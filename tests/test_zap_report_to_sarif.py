@@ -148,6 +148,39 @@ class ZapReportToSarifTests(unittest.TestCase):
         self.assertEqual(result["ruleId"], "50005:Nested alert")
         self.assertEqual(result["message"]["text"], "Nested alert")
 
+    def test_nested_instance_objects_are_expanded(self):
+        report = {
+            "site": {
+                "@name": "https://instance.example",
+                "alerts": {
+                    "alertitem": {
+                        "pluginid": "60006",
+                        "name": "Nested instance",
+                        "riskcode": "1",
+                        "desc": "Description",
+                        "instances": {
+                            "instance": {
+                                "uri": "https://instance.example/path",
+                                "evidence": "token",
+                            }
+                        },
+                    }
+                },
+            }
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            input_path = Path(td) / "report.json"
+            output_path = Path(td) / "report.sarif"
+            input_path.write_text(json.dumps(report), encoding="utf-8")
+
+            self.assertEqual(MODULE.convert_report(str(input_path), str(output_path)), 0)
+            sarif = json.loads(output_path.read_text(encoding="utf-8"))
+
+        result = sarif["runs"][0]["results"][0]
+        self.assertEqual(result["ruleId"], "60006:Nested instance")
+        self.assertEqual(result["message"]["text"], "Nested instance\nEvidence: token")
+
 
 if __name__ == "__main__":
     unittest.main()
