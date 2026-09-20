@@ -1,0 +1,217 @@
+name: DAST
+
+# Dynamic scanning needs something running to point at, and this repository has
+# no deployment yet. So the default target is built inside the job: the static
+# PWA is served from the runner and scanned over localhost. Nothing outside the
+# runner is touched unless DAST_TARGET_URL is configured.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      target-url:
+        description: URL to scan instead of the ephemeral local target
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dast-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  detect:
+    name: Detect static site
+    runs-on: ubuntu-latest
+    outputs:
+      static-dir: ${{ steps.detect.outputs.static-dir }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: detect
+        shell: bash
+        env:
+          # Set this repository variable if the site lives somewhere else.
+          OVERRIDE: ${{ vars.DAST_STATIC_DIR }}
+        run: |
+          set -euo pipefail
+
+          candidates="${OVERRIDE:-} web frontend frontend/public public dist site ."
+          found=""
+          for dir in $candidates; do
+            if [ -f "$dir/index.html" ]; then
+              found="$dir"
+              break
+            fi
+          done
+
+          echo "static-dir=$found" >> "$GITHUB_OUTPUT"
+          if [ -n "$found" ]; then
+            echo "Static site found at \`$found\` — it will be served and scanned." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No static site found (looked for an index.html) — local DAST skipped." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  local-target:
+    name: ZAP baseline (ephemeral local target)
+    needs: detect
+    if: needs.detect.outputs.static-dir != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Serve the site
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup python3 -m http.server 8080 \
+            --bind 127.0.0.1 \
+            --directory '${{ needs.detect.outputs.static-dir }}' \
+            > /tmp/static-server.log 2>&1 &
+          for _ in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8080/; then
+              echo "target is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "target never came up" >&2
+          cat /tmp/static-server.log >&2
+          exit 1
+
+      - name: ZAP baseline scan
+        id: zap
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p zap-out
+          cp .zap/rules.tsv zap-out/rules.tsv
+          chmod -R 777 zap-out
+
+          docker run --rm --network host \
+            -v "$PWD/zap-out:/zap/wrk/:rw" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py \
+              -t http://127.0.0.1:8080 \
+              -c rules.tsv \
+              -r report.html \
+              -J report.json \
+              -w report.md \
+              -a
+          echo "exit-code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Report
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f zap-out/report.md ]; then
+            cat zap-out/report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # zap-baseline.py: 0 clean, 1 a FAIL rule tripped, 2 warnings only,
+          # 3 the scan itself broke. A bare python http.server sends none of the
+          # security headers that Cloudflare Pages will send, so warnings here
+          # are noise rather than a defect in the change under review.
+          case "${{ steps.zap.outputs.exit-code }}" in
+            0) echo "No alerts." ;;
+            2) echo "::warning::ZAP raised warnings against the local static target — see the job summary." ;;
+            *) exit 1 ;;
+          esac
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-local-target
+          path: zap-out/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  deployed-target:
+    name: ZAP baseline (deployed target)
+    # Only runs once there is somewhere to point at: set the DAST_TARGET_URL
+    # repository variable to a preview or staging URL, or pass one to a manual
+    # run. This is a passive baseline scan, never an active attack, so it is
+    # safe against a shared environment.
+    if: ${{ vars.DAST_TARGET_URL != '' || inputs.target-url != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ZAP baseline scan
+        id: zap
+        shell: bash
+        env:
+          TARGET: ${{ inputs.target-url || vars.DAST_TARGET_URL }}
+        run: |
+          set -uo pipefail
+          mkdir -p zap-out
+          cp .zap/rules.tsv zap-out/rules.tsv
+          chmod -R 777 zap-out
+
+          docker run --rm \
+            -v "$PWD/zap-out:/zap/wrk/:rw" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py \
+              -t "$TARGET" \
+              -c rules.tsv \
+              -r report.html \
+              -J report.json \
+              -w report.md \
+              -a
+          echo "exit-code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Report
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f zap-out/report.md ]; then
+            cat zap-out/report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # A real deployment is expected to send its security headers, so
+          # warnings fail here where they only warn against the local target.
+          case "${{ steps.zap.outputs.exit-code }}" in
+            0) echo "No alerts." ;;
+            *) exit 1 ;;
+          esac
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-deployed-target
+          path: zap-out/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  dast:
+    name: DAST
+    # Single stable check for branch protection, green when there is nothing
+    # running to scan.
+    needs: [detect, local-target, deployed-target]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect results
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail=0
+          for result in \
+            "local-target=${{ needs.local-target.result }}" \
+            "deployed-target=${{ needs.deployed-target.result }}"
+          do
+            name="${result%%=*}"
+            state="${result#*=}"
+            echo "- $name: $state" >> "$GITHUB_STEP_SUMMARY"
+            case "$state" in
+              success|skipped) ;;
+              *) fail=1 ;;
+            esac
+          done
+          exit "$fail"

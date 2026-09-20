@@ -1,0 +1,212 @@
+name: Terraform
+
+# Formatting, validation, linting and security scanning for Terraform.
+# There is no Terraform in this repository yet, so the detect job below short
+# circuits everything and the workflow passes. It starts doing real work the
+# moment the first .tf file lands.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  TERRAFORM_VERSION: 1.9.8
+
+jobs:
+  detect:
+    name: Detect Terraform
+    runs-on: ubuntu-latest
+    outputs:
+      has-terraform: ${{ steps.detect.outputs.has-terraform }}
+      root-modules: ${{ steps.detect.outputs.root-modules }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Every directory holding at least one .tf file, excluding modules
+          # vendored into .terraform/.
+          dirs="$(find . -path ./.git -prune -o -path '*/.terraform' -prune -o \
+            -type f -name '*.tf' -printf '%h\n' 2>/dev/null | sort -u || true)"
+
+          if [ -z "$dirs" ]; then
+            echo "has-terraform=false" >> "$GITHUB_OUTPUT"
+            echo "root-modules=[]" >> "$GITHUB_OUTPUT"
+            echo "No Terraform files found — Terraform checks skipped." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          json="$(printf '%s\n' "$dirs" | jq -R . | jq -sc .)"
+          echo "has-terraform=true" >> "$GITHUB_OUTPUT"
+          echo "root-modules=$json" >> "$GITHUB_OUTPUT"
+          {
+            echo "Terraform directories:"
+            printf '%s\n' "$dirs" | sed 's/^/- /'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  fmt-validate:
+    name: fmt & validate
+    needs: detect
+    if: needs.detect.outputs.has-terraform == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive -diff
+
+      - name: terraform validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=0
+          for dir in $(echo '${{ needs.detect.outputs.root-modules }}' | jq -r '.[]'); do
+            echo "::group::validate $dir"
+            # -backend=false keeps this from needing any cloud credentials.
+            if terraform -chdir="$dir" init -backend=false -input=false -no-color \
+              && terraform -chdir="$dir" validate -no-color; then
+              :
+            else
+              failed=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$failed"
+
+  tflint:
+    name: tflint
+    needs: detect
+    if: needs.detect.outputs.has-terraform == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.53.0
+
+      - name: tflint --init
+        run: tflint --init
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: tflint
+        run: tflint --recursive --format compact --minimum-failure-severity=error
+
+  trivy:
+    name: Trivy (misconfiguration)
+    needs: detect
+    if: needs.detect.outputs.has-terraform == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan for misconfiguration
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: sarif
+          output: trivy.sarif
+          severity: HIGH,CRITICAL
+          exit-code: '0'
+
+      - name: Upload SARIF
+        if: ${{ always() && !github.event.pull_request.head.repo.fork && hashFiles('trivy.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-terraform
+
+      - name: Fail on findings
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+
+  checkov:
+    name: Checkov
+    needs: detect
+    if: needs.detect.outputs.has-terraform == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Checkov
+        run: pip install --disable-pip-version-check checkov==3.2.334
+
+      - name: Scan
+        run: |
+          checkov \
+            --directory . \
+            --framework terraform \
+            --quiet \
+            --compact \
+            --output cli \
+            --output sarif \
+            --output-file-path console,checkov.sarif
+
+      - name: Upload SARIF
+        if: ${{ always() && !github.event.pull_request.head.repo.fork && hashFiles('checkov.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: checkov.sarif
+          category: checkov
+
+  terraform:
+    name: Terraform
+    # Single stable check for branch protection, green when there is no
+    # Terraform to check.
+    needs: [detect, fmt-validate, tflint, trivy, checkov]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect results
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail=0
+          for result in \
+            "fmt-validate=${{ needs.fmt-validate.result }}" \
+            "tflint=${{ needs.tflint.result }}" \
+            "trivy=${{ needs.trivy.result }}" \
+            "checkov=${{ needs.checkov.result }}"
+          do
+            name="${result%%=*}"
+            state="${result#*=}"
+            echo "- $name: $state" >> "$GITHUB_STEP_SUMMARY"
+            case "$state" in
+              success|skipped) ;;
+              *) fail=1 ;;
+            esac
+          done
+          exit "$fail"

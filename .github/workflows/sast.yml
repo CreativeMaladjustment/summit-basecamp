@@ -1,0 +1,211 @@
+name: SAST
+
+# Static analysis on every pull request. Every job detects what is actually in
+# the tree first, so the workflow passes cleanly while parts of the repo are
+# still empty.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sast-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  detect:
+    name: Detect languages
+    runs-on: ubuntu-latest
+    outputs:
+      codeql-languages: ${{ steps.detect.outputs.codeql-languages }}
+      has-source: ${{ steps.detect.outputs.has-source }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          have() {
+            find . -path ./.git -prune -o -type f -name "$1" -print -quit | grep -q .
+          }
+
+          langs=""
+          if have '*.py'; then
+            langs="\"python\""
+          fi
+          if have '*.js' || have '*.mjs' || have '*.cjs' \
+            || have '*.jsx' || have '*.ts' || have '*.tsx'; then
+            if [ -n "$langs" ]; then
+              langs="$langs,"
+            fi
+            langs="$langs\"javascript-typescript\""
+          fi
+
+          echo "codeql-languages=[$langs]" >> "$GITHUB_OUTPUT"
+          if [ -n "$langs" ]; then
+            echo "has-source=true" >> "$GITHUB_OUTPUT"
+            echo "CodeQL will analyse: [$langs]" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "has-source=false" >> "$GITHUB_OUTPUT"
+            echo "No Python or JavaScript/TypeScript sources found — CodeQL skipped." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    needs: detect
+    if: needs.detect.outputs.codeql-languages != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(needs.detect.outputs.codeql-languages) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}
+          # Pull requests from forks get a read-only token, so the upload to the
+          # code scanning API would fail. Analyse anyway, just do not upload.
+          upload: ${{ github.event.pull_request.head.repo.fork && 'never' || 'always' }}
+
+  semgrep:
+    name: Semgrep
+    needs: detect
+    if: needs.detect.outputs.has-source == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Semgrep
+        run: pip install --disable-pip-version-check semgrep==1.86.0
+
+      - name: Scan
+        id: scan
+        run: |
+          semgrep scan \
+            --config=p/default \
+            --config=p/secrets \
+            --metrics=off \
+            --severity=ERROR \
+            --error \
+            --sarif-output=semgrep.sarif \
+            --exclude='.github/workflows' \
+            .
+
+      - name: Upload SARIF
+        if: ${{ always() && !github.event.pull_request.head.repo.fork && hashFiles('semgrep.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Gitleaks walks commit history, so it needs the full clone.
+          fetch-depth: 0
+
+      - name: Install Gitleaks
+        env:
+          GITLEAKS_VERSION: 8.18.4
+        run: |
+          set -euo pipefail
+          curl -sSfL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf gitleaks.tar.gz gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Scan history for secrets
+        run: |
+          gitleaks detect \
+            --source . \
+            --redact \
+            --verbose \
+            --report-format sarif \
+            --report-path gitleaks.sarif \
+            --exit-code 1
+
+      - name: Upload SARIF
+        if: ${{ always() && !github.event.pull_request.head.repo.fork && hashFiles('gitleaks.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gitleaks.sarif
+          category: gitleaks
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
+
+  sast:
+    name: SAST
+    # Single stable check for branch protection: green when every scan that had
+    # something to look at passed, and green when there was nothing to look at.
+    needs: [detect, codeql, semgrep, secrets, dependency-review]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect results
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail=0
+          for result in \
+            "codeql=${{ needs.codeql.result }}" \
+            "semgrep=${{ needs.semgrep.result }}" \
+            "secrets=${{ needs.secrets.result }}" \
+            "dependency-review=${{ needs.dependency-review.result }}"
+          do
+            name="${result%%=*}"
+            state="${result#*=}"
+            echo "- $name: $state" >> "$GITHUB_STEP_SUMMARY"
+            case "$state" in
+              success|skipped) ;;
+              *) fail=1 ;;
+            esac
+          done
+          exit "$fail"
