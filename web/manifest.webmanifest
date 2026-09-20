@@ -1,0 +1,14 @@
+{
+  "name": "Summit Hearth & Bench",
+  "short_name": "Hearth & Bench",
+  "description": "Collaborative season-ticket sharing, seat liquidity and expense splitting.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F8F7F2",
+  "theme_color": "#134E48",
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
