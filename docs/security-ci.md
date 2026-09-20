@@ -15,7 +15,7 @@ protection: they stay stable as jobs come and go underneath them.
 | CodeQL | `github/codeql-action` | Python or JS/TS files exist |
 | Semgrep | `semgrep` OSS rules | Python or JS/TS files exist |
 | Secret scan | `gitleaks` | always |
-| Dependency review | `actions/dependency-review-action` | always, on pull requests |
+| Dependency review | `actions/dependency-review-action` | pull requests with a dependency manifest |
 
 CodeQL runs one matrix leg per language found, with the `security-and-quality`
 query suite, and publishes to the Security tab. Semgrep runs `p/default` and
@@ -28,9 +28,11 @@ nothing to review. It also needs the repository's **Dependency graph** to be
 turned on, under Settings → Code security. Turn it on before the first
 `package.json` or `pyproject.toml` lands, or the check will start failing then.
 
-Everything uploads SARIF, so findings land as code scanning alerts and get
-annotated inline on the diff. Uploads are skipped for pull requests from forks,
-where the token is read-only — the scan still runs and still fails the job.
+CodeQL, Semgrep and Gitleaks upload SARIF, so their findings land as code
+scanning alerts. Uploads are skipped for pull requests from forks, where the
+token is read-only — the scan still runs and still fails the job. Dependency
+review reports through its own check run and only comments on the pull request
+when it fails.
 
 ## Terraform — `.github/workflows/terraform.yml`
 
@@ -73,7 +75,8 @@ dev` pulling the Pyodide runtime, which is slow and flaky. Once the API has a
 preview deployment, `DAST_TARGET_URL` is where it goes.
 
 Reports are uploaded as build artifacts (`zap-local-target`,
-`zap-deployed-target`) and the summary is written into the job summary.
+`zap-deployed-target`), converted to SARIF for same-repository pull requests,
+and summarised in the job summary.
 
 ### Tuning ZAP
 
