@@ -1,0 +1,202 @@
+name: Deploy
+
+# Deploys to Cloudflare through the "shb" GitHub environment, which holds
+# CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID.
+#
+# Neither the API nor the site is on main yet, so the detect job below finds
+# nothing and every deploying job skips. Each one switches itself on when the
+# thing it deploys lands.
+#
+# The API token deliberately has no zone or DNS permission — the custom domain
+# is a CNAME managed outside this repository — so nothing here touches DNS.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: What to deploy
+        required: false
+        default: all
+        type: choice
+        options: [all, api, web]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One deploy at a time, and never cancel one that is already in flight.
+  group: deploy-shb
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    name: Detect deployables
+    runs-on: ubuntu-latest
+    outputs:
+      worker-dir: ${{ steps.detect.outputs.worker-dir }}
+      static-dir: ${{ steps.detect.outputs.static-dir }}
+      d1-database: ${{ steps.detect.outputs.d1-database }}
+      has-migrations: ${{ steps.detect.outputs.has-migrations }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: detect
+        shell: bash
+        env:
+          # Set this repository variable if the site lives somewhere else.
+          STATIC_OVERRIDE: ${{ vars.CF_PAGES_DIRECTORY }}
+          # Set this if the D1 database is not named in the wrangler config.
+          D1_OVERRIDE: ${{ vars.CF_D1_DATABASE }}
+        run: |
+          set -euo pipefail
+
+          # The Worker is wherever the wrangler config is.
+          config="$(find . -path ./.git -prune -o -type f \
+            \( -name 'wrangler.toml' -o -name 'wrangler.json' -o -name 'wrangler.jsonc' \) \
+            -print -quit 2>/dev/null || true)"
+
+          worker_dir=""
+          if [ -n "$config" ]; then
+            worker_dir="$(dirname "$config")"
+          fi
+          echo "worker-dir=$worker_dir" >> "$GITHUB_OUTPUT"
+
+          # D1 database name, for applying migrations. Read it out of the
+          # wrangler config rather than hardcoding it, so renaming the database
+          # in one place is enough.
+          database="${D1_OVERRIDE:-}"
+          if [ -z "$database" ] && [ -n "$config" ] && [ "${config##*.}" = "toml" ]; then
+            database="$(python3 - "$config" <<'PY' || true
+          import sys, tomllib
+          try:
+              with open(sys.argv[1], "rb") as fh:
+                  cfg = tomllib.load(fh)
+          except Exception:
+              raise SystemExit(0)
+          dbs = cfg.get("d1_databases") or []
+          if dbs:
+              print(dbs[0].get("database_name", ""))
+          PY
+          )"
+          fi
+          echo "d1-database=$database" >> "$GITHUB_OUTPUT"
+
+          has_migrations=false
+          if [ -n "$worker_dir" ] && [ -d "$worker_dir/migrations" ] \
+            && find "$worker_dir/migrations" -name '*.sql' -print -quit | grep -q .; then
+            has_migrations=true
+          fi
+          echo "has-migrations=$has_migrations" >> "$GITHUB_OUTPUT"
+
+          # The Pages site is the directory holding index.html.
+          static_dir=""
+          for dir in ${STATIC_OVERRIDE:-} web frontend frontend/public public dist site; do
+            if [ -f "$dir/index.html" ]; then
+              static_dir="$dir"
+              break
+            fi
+          done
+          echo "static-dir=$static_dir" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "| What | Found |"
+            echo "| --- | --- |"
+            echo "| Worker | ${worker_dir:-not present} |"
+            echo "| D1 database | ${database:-not configured} |"
+            echo "| Migrations | $has_migrations |"
+            echo "| Pages site | ${static_dir:-not present} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  api:
+    name: Deploy API
+    needs: detect
+    if: >-
+      needs.detect.outputs.worker-dir != ''
+      && (github.event_name != 'workflow_dispatch' || inputs.target != 'web')
+    runs-on: ubuntu-latest
+    environment: shb
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Migrations run before the Worker that depends on them.
+      - name: Apply D1 migrations
+        if: needs.detect.outputs.has-migrations == 'true' && needs.detect.outputs.d1-database != ''
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: ${{ needs.detect.outputs.worker-dir }}
+          command: d1 migrations apply ${{ needs.detect.outputs.d1-database }} --remote
+
+      - name: Warn when migrations cannot be applied
+        if: needs.detect.outputs.has-migrations == 'true' && needs.detect.outputs.d1-database == ''
+        run: |
+          echo "::warning::Migrations exist but no D1 database name was found in the wrangler config. Set the CF_D1_DATABASE repository variable, or name the database in wrangler.toml. Skipping migrations rather than guessing."
+
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: ${{ needs.detect.outputs.worker-dir }}
+          command: deploy
+
+  web:
+    name: Deploy site
+    # Deliberately after the API: the site calls it, so the API should be the
+    # newer of the two if a deploy only half succeeds.
+    needs: [detect, api]
+    if: >-
+      always()
+      && needs.detect.result == 'success'
+      && needs.detect.outputs.static-dir != ''
+      && needs.api.result != 'failure'
+      && needs.api.result != 'cancelled'
+      && (github.event_name != 'workflow_dispatch' || inputs.target != 'api')
+    runs-on: ubuntu-latest
+    environment: shb
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Deploy to Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: >-
+            pages deploy ${{ needs.detect.outputs.static-dir }}
+            --project-name=${{ vars.CF_PAGES_PROJECT || 'summit-hearth-and-bench' }}
+            --branch=main
+
+  deploy:
+    name: Deploy
+    # Single stable check, green when there was nothing to deploy.
+    needs: [detect, api, web]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect results
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail=0
+          for result in "api=${{ needs.api.result }}" "web=${{ needs.web.result }}"; do
+            name="${result%%=*}"
+            state="${result#*=}"
+            echo "- $name: $state" >> "$GITHUB_STEP_SUMMARY"
+            case "$state" in
+              success|skipped) ;;
+              *) fail=1 ;;
+            esac
+          done
+          exit "$fail"
