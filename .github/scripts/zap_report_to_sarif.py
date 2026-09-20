@@ -7,6 +7,14 @@ LEVEL_MAP = {"0": "note", "1": "warning", "2": "error", "3": "error"}
 SEVERITY_MAP = {"0": "0.0", "1": "3.3", "2": "6.7", "3": "9.8"}
 
 
+def ensure_list(value):
+    if isinstance(value, list):
+        return value
+    if value in (None, ""):
+        return []
+    return [value]
+
+
 def first_reference_url(reference_text: str) -> str:
     for candidate in str(reference_text).splitlines():
         candidate = candidate.strip()
@@ -76,13 +84,13 @@ def convert_report(input_path: str, output_path: str) -> int:
     rules = {}
     results = []
 
-    for site in report.get("site", []):
+    for site in ensure_list(report.get("site", [])):
         site_uri = site.get("@name", "")
-        for alert in site.get("alerts", []):
+        for alert in ensure_list(site.get("alerts", [])):
             risk_code = str(alert.get("riskcode") or alert.get("riskCode") or "0")
             rule = build_rule(alert, risk_code)
             rules.setdefault(rule["id"], rule)
-            instances = alert.get("instances") or [{}]
+            instances = ensure_list(alert.get("instances")) or [{}]
             for instance in instances:
                 results.append(build_result(rules[rule["id"]], risk_code, site_uri, alert, instance))
 

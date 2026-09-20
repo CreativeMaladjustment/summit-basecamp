@@ -87,6 +87,37 @@ class ZapReportToSarifTests(unittest.TestCase):
         self.assertEqual(result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"], "https://site.example")
         self.assertEqual(result["message"]["text"], "No instances\nDetails")
 
+    def test_single_site_and_instance_objects_are_normalized(self):
+        report = {
+            "site": {
+                "@name": "https://solo.example",
+                "alerts": [
+                    {
+                        "pluginid": "40004",
+                        "name": "Single site",
+                        "riskcode": "2",
+                        "desc": "Description",
+                        "instances": {"uri": "https://solo.example/path", "param": "p"},
+                    }
+                ],
+            }
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            input_path = Path(td) / "report.json"
+            output_path = Path(td) / "report.sarif"
+            input_path.write_text(json.dumps(report), encoding="utf-8")
+
+            self.assertEqual(MODULE.convert_report(str(input_path), str(output_path)), 0)
+            sarif = json.loads(output_path.read_text(encoding="utf-8"))
+
+        result = sarif["runs"][0]["results"][0]
+        self.assertEqual(result["ruleId"], "40004")
+        self.assertEqual(
+            result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+            "https://solo.example/path",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
