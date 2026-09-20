@@ -1,0 +1,216 @@
+name: Terraform
+
+# Formatting, validation, linting and security scanning for Terraform.
+# There is no Terraform in this repository yet, so the detect job below short
+# circuits everything and the workflow passes. It starts doing real work the
+# moment the first .tf file lands.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  TERRAFORM_VERSION: 1.9.8
+
+jobs:
+  detect:
+    name: Detect Terraform
+    runs-on: ubuntu-latest
+    outputs:
+      has-terraform: ${{ steps.detect.outputs.has-terraform }}
+      root-modules: ${{ steps.detect.outputs.root-modules }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Every directory holding at least one .tf file, excluding modules
+          # vendored into .terraform/.
+          dirs="$(find . -path ./.git -prune -o -path '*/.terraform' -prune -o \
+            -type f -name '*.tf' -printf '%h\n' 2>/dev/null | sort -u || true)"
+
+          if [ -z "$dirs" ]; then
+            echo "has-terraform=false" >> "$GITHUB_OUTPUT"
+            echo "root-modules=[]" >> "$GITHUB_OUTPUT"
+            echo "No Terraform files found — Terraform checks skipped." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          json="$(printf '%s\n' "$dirs" | jq -R . | jq -sc .)"
+          echo "has-terraform=true" >> "$GITHUB_OUTPUT"
+          echo "root-modules=$json" >> "$GITHUB_OUTPUT"
+          {
+            echo "Terraform directories:"
+            printf '%s\n' "$dirs" | sed 's/^/- /'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  fmt-validate:
+    name: fmt & validate
+    needs: detect
+    if: needs.detect.outputs.has-terraform == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive -diff
+
+      - name: terraform validate
+        shell: bash
+        env:
+          ROOT_MODULES: ${{ needs.detect.outputs.root-modules }}
+        run: |
+          set -euo pipefail
+          failed=0
+          while IFS= read -r dir_json; do
+            dir="$(jq -r . <<<"$dir_json")"
+            echo "::group::validate $dir"
+            # -backend=false keeps this from needing any cloud credentials.
+            if terraform -chdir="$dir" init -backend=false -input=false -no-color \
+              && terraform -chdir="$dir" validate -no-color; then
+              :
+            else
+              failed=1
+            fi
+            echo "::endgroup::"
+          done < <(jq -cr '.[]' <<<"$ROOT_MODULES")
+          exit "$failed"
+
+  tflint:
+    name: tflint
+    needs: detect
+    if: needs.detect.outputs.has-terraform == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: terraform-linters/setup-tflint@1cf010d3c7aef302051ccdb68c14c5dc2efa34ef # v6.3.1
+        with:
+          tflint_version: v0.53.0
+
+      - name: tflint --init
+        run: tflint --init
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: tflint
+        run: tflint --recursive --format compact --minimum-failure-severity=error
+
+  trivy:
+    name: Trivy (misconfiguration)
+    needs: detect
+    if: needs.detect.outputs.has-terraform == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Scan for misconfiguration
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: sarif
+          output: trivy.sarif
+          severity: HIGH,CRITICAL
+          exit-code: '0'
+
+      - name: Upload SARIF
+        if: ${{ always() && !github.event.pull_request.head.repo.fork && hashFiles('trivy.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-terraform
+
+      - name: Fail on findings
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+
+  checkov:
+    name: Checkov
+    needs: detect
+    if: needs.detect.outputs.has-terraform == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install Checkov
+        run: pip install --disable-pip-version-check checkov==3.2.334
+
+      - name: Scan
+        run: |
+          checkov \
+            --directory . \
+            --framework terraform \
+            --quiet \
+            --compact \
+            --output cli \
+            --output sarif \
+            --output-file-path console,checkov.sarif
+
+      - name: Upload SARIF
+        if: ${{ always() && !github.event.pull_request.head.repo.fork && hashFiles('checkov.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        with:
+          sarif_file: checkov.sarif
+          category: checkov
+
+  terraform:
+    name: Terraform
+    # Single stable check for branch protection, green when there is no
+    # Terraform to check.
+    needs: [detect, fmt-validate, tflint, trivy, checkov]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect results
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail=0
+          for result in \
+            "detect=${{ needs.detect.result }}" \
+            "fmt-validate=${{ needs.fmt-validate.result }}" \
+            "tflint=${{ needs.tflint.result }}" \
+            "trivy=${{ needs.trivy.result }}" \
+            "checkov=${{ needs.checkov.result }}"
+          do
+            name="${result%%=*}"
+            state="${result#*=}"
+            echo "- $name: $state" >> "$GITHUB_STEP_SUMMARY"
+            case "$state" in
+              success|skipped) ;;
+              *) fail=1 ;;
+            esac
+          done
+          exit "$fail"

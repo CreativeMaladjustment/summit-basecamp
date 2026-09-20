@@ -3,5 +3,17 @@ node_modules/
 .dev.vars
 dist/
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+.pytest_cache/
 .venv/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+
+# Editors / OS
+.DS_Store
+*.swp
