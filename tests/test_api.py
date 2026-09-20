@@ -68,6 +68,13 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status, 204)
         self.assertEqual(response.headers.get("Access-Control-Allow-Origin"), "*")
 
+    def test_preflight_response_has_no_body(self):
+        # A 204 carrying a JSON body is rejected by real fetch implementations
+        # even though the test double would accept it.
+        request = FakeRequest(method="OPTIONS", url="http://localhost:8787/api/groups")
+        response = asyncio.run(entry.on_fetch(request, self.env))
+        self.assertFalse(response.body)
+
     def test_every_response_carries_cors_headers(self):
         request = FakeRequest(method="GET", url="http://localhost:8787/api/health")
         response = asyncio.run(entry.on_fetch(request, self.env))
@@ -169,6 +176,50 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("Missing required field", payload["error"])
 
+    def test_a_non_integer_weighted_value_is_rejected_not_500ed(self):
+        status, payload = call(
+            self.env,
+            "POST",
+            "/api/groups/grp_summit/fixtures",
+            body={
+                "opponent": "Harbour City",
+                "kickoff_at": "2026-11-01T19:30:00Z",
+                "venue": "Summit Park",
+                "weighted_value_cents": "not-a-number",
+            },
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("weighted_value_cents", payload["error"])
+
+    def test_a_non_integer_group_field_is_rejected_not_500ed(self):
+        status, payload = call(
+            self.env,
+            "POST",
+            "/api/groups",
+            body={
+                "name": "Away Day Crew",
+                "season_year": "soon",
+                "total_seats": 2,
+                "package_cost_cents": 100000,
+            },
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("season_year", payload["error"])
+
+    def test_a_zero_seat_group_is_rejected(self):
+        status, _ = call(
+            self.env,
+            "POST",
+            "/api/groups",
+            body={
+                "name": "Away Day Crew",
+                "season_year": 2027,
+                "total_seats": 0,
+                "package_cost_cents": 100000,
+            },
+        )
+        self.assertEqual(status, 400)
+
     def test_benching_a_seat_releases_it(self):
         status, payload = call(
             self.env, "PATCH", "/api/seats/seat_001", body={"status": "on_bench"}
@@ -205,11 +256,96 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertIn("resale_price_cents", payload["error"])
 
+    def test_a_resale_price_must_be_a_positive_number(self):
+        for bad_price in ("0", -500, "not-a-number", True):
+            status, _ = call(
+                self.env,
+                "PATCH",
+                "/api/seats/seat_001",
+                body={"status": "resale_listed", "resale_price_cents": bad_price},
+            )
+            self.assertEqual(status, 400, "price {!r} should be rejected".format(bad_price))
+
     def test_an_unknown_status_is_rejected(self):
         status, _ = call(
             self.env, "PATCH", "/api/seats/seat_001", body={"status": "teleported"}
         )
         self.assertEqual(status, 400)
+
+    def test_a_benched_seat_cannot_be_resold_without_being_claimed_first(self):
+        status, payload = call(
+            self.env,
+            "PATCH",
+            "/api/seats/seat_003",
+            user="usr_bo",
+            body={"status": "resale_listed", "resale_price_cents": 5000},
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("can only be claimed", payload["error"])
+
+    def test_a_claim_cannot_assign_the_seat_to_someone_else(self):
+        status, payload = call(
+            self.env,
+            "PATCH",
+            "/api/seats/seat_003",
+            user="usr_bo",
+            body={"status": "confirmed", "assigned_user_id": "usr_cyd"},
+        )
+        self.assertEqual(status, 200)
+        # The caller claiming it, not the assigned_user_id they sent, wins.
+        self.assertEqual(payload["seat"]["assigned_user_id"], "usr_bo")
+
+    def test_a_holder_cannot_reassign_their_seat_to_someone_else(self):
+        status, payload = call(
+            self.env,
+            "PATCH",
+            "/api/seats/seat_001",
+            body={"status": "gifted", "assigned_user_id": "usr_bo"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["seat"]["assigned_user_id"], "usr_ada")
+
+    def test_a_stale_seat_write_is_rejected_as_a_conflict_not_overwritten(self):
+        import handlers
+
+        seat = asyncio.run(
+            self.env.DB.prepare(
+                "SELECT * FROM seat_allocations WHERE id = 'seat_003'"
+            ).first()
+        )
+        # Two callers who both read the seat while it was still on the bench;
+        # only the first write should land.
+        first = asyncio.run(
+            handlers._write_seat_if_unchanged(self.env, seat, "confirmed", "usr_bo", None, None)
+        )
+        second = asyncio.run(
+            handlers._write_seat_if_unchanged(self.env, seat, "confirmed", "usr_cyd", None, None)
+        )
+        self.assertEqual(first, 1)
+        self.assertEqual(second, 0)
+
+    def test_a_past_fixture_does_not_appear_in_listings(self):
+        status, payload = call(
+            self.env,
+            "POST",
+            "/api/groups/grp_summit/fixtures",
+            body={
+                "opponent": "Yesterday United",
+                "kickoff_at": "2020-01-01T12:00:00Z",
+                "venue": "Summit Park",
+                "weighted_value_cents": 1000,
+            },
+        )
+        self.assertEqual(status, 201)
+        fixture_id = payload["fixture"]["id"]
+        status, payload = call(self.env, "GET", "/api/fixtures/{}/seats".format(fixture_id))
+        seat_id = payload["seats"][0]["id"]
+        call(self.env, "PATCH", "/api/seats/{}".format(seat_id), body={"status": "on_bench"})
+
+        status, payload = call(self.env, "GET", "/api/groups/grp_summit/listings")
+        self.assertNotIn(
+            "Yesterday United", [listing["opponent"] for listing in payload["listings"]]
+        )
 
     def test_listings_show_benched_and_resale_seats(self):
         status, payload = call(self.env, "GET", "/api/groups/grp_summit/listings")
@@ -280,6 +416,40 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 400)
 
+    def test_a_non_integer_amount_is_rejected_not_500ed(self):
+        status, payload = call(
+            self.env,
+            "POST",
+            "/api/groups/grp_summit/expenses",
+            body={"amount_cents": "abc", "description": "Parking"},
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("amount_cents", payload["error"])
+
+    def test_an_empty_split_between_is_rejected_not_silently_everyone(self):
+        status, payload = call(
+            self.env,
+            "POST",
+            "/api/groups/grp_summit/expenses",
+            body={"amount_cents": 3000, "description": "Coach", "split_between": []},
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("split_between", payload["error"])
+
+    def test_a_repeated_member_in_split_between_is_rejected(self):
+        status, payload = call(
+            self.env,
+            "POST",
+            "/api/groups/grp_summit/expenses",
+            body={
+                "amount_cents": 3000,
+                "description": "Coach",
+                "split_between": ["usr_ada", "usr_bo", "usr_bo"],
+            },
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("split_between", payload["error"])
+
     def test_settling_up_clears_only_that_pair(self):
         status, payload = call(
             self.env,
@@ -316,6 +486,20 @@ class ApiTests(unittest.TestCase):
         status, payload = call(self.env, "GET", "/api/preferences")
         self.assertEqual(payload["preferences"]["daily_bio_scope"], "league_wide")
 
+    def test_a_non_boolean_preference_is_rejected(self):
+        status, payload = call(
+            self.env, "PUT", "/api/preferences", body={"notify_bench_alerts": "false"}
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("notify_bench_alerts", payload["error"])
+
+    def test_an_unknown_bio_scope_is_rejected(self):
+        status, payload = call(
+            self.env, "PUT", "/api/preferences", body={"daily_bio_scope": "everywhere"}
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("daily_bio_scope", payload["error"])
+
 
 class ScheduledTests(unittest.TestCase):
     def setUp(self):
@@ -329,9 +513,22 @@ class ScheduledTests(unittest.TestCase):
         )
         return row["n"]
 
-    def test_the_morning_cron_schedules_one_more_bio_for_today(self):
+    def test_the_morning_cron_is_a_no_op_when_todays_bio_is_already_set(self):
         import types as _types
 
+        # The seed data already has bio_001 scheduled for today.
+        before = self._unscheduled_count()
+        asyncio.run(entry.on_scheduled(_types.SimpleNamespace(cron="0 8 * * *"), self.env, None))
+        self.assertEqual(self._unscheduled_count(), before)
+
+    def test_the_morning_cron_schedules_a_bio_when_none_is_set_for_today(self):
+        import types as _types
+
+        asyncio.run(
+            self.env.DB.prepare(
+                "UPDATE player_bios SET scheduled_date = NULL WHERE scheduled_date = DATE('now')"
+            ).run()
+        )
         before = self._unscheduled_count()
         asyncio.run(entry.on_scheduled(_types.SimpleNamespace(cron="0 8 * * *"), self.env, None))
         self.assertEqual(self._unscheduled_count(), before - 1)
@@ -342,7 +539,27 @@ class ScheduledTests(unittest.TestCase):
                 " WHERE scheduled_date = DATE('now')"
             ).first()
         )
-        self.assertEqual(row["n"], 2)
+        self.assertEqual(row["n"], 1)
+
+    def test_the_morning_cron_is_idempotent_across_retries(self):
+        import types as _types
+
+        asyncio.run(
+            self.env.DB.prepare(
+                "UPDATE player_bios SET scheduled_date = NULL WHERE scheduled_date = DATE('now')"
+            ).run()
+        )
+        for _ in range(3):
+            asyncio.run(
+                entry.on_scheduled(_types.SimpleNamespace(cron="0 8 * * *"), self.env, None)
+            )
+        row = asyncio.run(
+            self.env.DB.prepare(
+                "SELECT COUNT(*) AS n FROM player_bios"
+                " WHERE scheduled_date = DATE('now')"
+            ).first()
+        )
+        self.assertEqual(row["n"], 1)
 
     def test_the_check_in_cron_runs_against_fixtures_three_days_out(self):
         import types as _types

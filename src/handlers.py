@@ -6,11 +6,12 @@ Every handler takes ``(request, env, params)`` and returns a Response.
 
 from auth import current_user, require_admin, require_membership
 from db import batch, execute, new_id, query, query_one
-from responses import ApiError, json_response, read_json, require
+from responses import ApiError, json_response, read_json, require, require_int
 from splits import net_balances, settle_plan, split_equally
 
 SEAT_STATUSES = ("confirmed", "on_bench", "gifted", "resale_listed")
 FIXTURE_TIERS = ("rivalry", "standard", "cup")
+BIO_SCOPES = ("home_first", "summit_only", "league_wide")
 
 
 # --- health and identity ---------------------------------------------------
@@ -65,9 +66,10 @@ async def list_groups(request, env, params):
 async def create_group(request, env, params):
     user = await current_user(request, env)
     body = await read_json(request)
-    name, season_year, total_seats, package_cost_cents = require(
-        body, "name", "season_year", "total_seats", "package_cost_cents"
-    )
+    (name,) = require(body, "name")
+    season_year = require_int(body, "season_year", minimum=1900)
+    total_seats = require_int(body, "total_seats", minimum=1)
+    package_cost_cents = require_int(body, "package_cost_cents", minimum=0)
 
     group_id = new_id("grp")
     await batch(
@@ -82,9 +84,9 @@ async def create_group(request, env, params):
                 (
                     group_id,
                     name,
-                    int(season_year),
-                    int(total_seats),
-                    int(package_cost_cents),
+                    season_year,
+                    total_seats,
+                    package_cost_cents,
                     user["id"],
                 ),
             ),
@@ -156,9 +158,8 @@ async def create_fixture(request, env, params):
     await require_admin(env, group_id, user["id"])
 
     body = await read_json(request)
-    opponent, kickoff_at, venue, weighted_value_cents = require(
-        body, "opponent", "kickoff_at", "venue", "weighted_value_cents"
-    )
+    opponent, kickoff_at, venue = require(body, "opponent", "kickoff_at", "venue")
+    weighted_value_cents = require_int(body, "weighted_value_cents", minimum=0)
     tier = body.get("tier", "standard")
     if tier not in FIXTURE_TIERS:
         raise ApiError(400, "tier must be one of: " + ", ".join(FIXTURE_TIERS))
@@ -182,7 +183,7 @@ async def create_fixture(request, env, params):
                 kickoff_at,
                 venue,
                 tier,
-                int(weighted_value_cents),
+                weighted_value_cents,
             ),
         )
     ]
@@ -236,7 +237,14 @@ async def list_seats(request, env, params):
 
 
 async def update_seat(request, env, params):
-    """Claim a seat, put it on the bench, gift it, or list it for resale."""
+    """Claim a benched seat, or -- as its holder -- bench it, gift it, or list it.
+
+    A seat with no holder can only be claimed (set to 'confirmed', for the
+    caller themselves): a member cannot gift or resell a seat they have not
+    first taken, and cannot assign a seat to anyone but themselves -- this
+    endpoint has no transfer flow. A seat with a holder can only be changed by
+    that holder.
+    """
     user = await current_user(request, env)
     body = await read_json(request)
 
@@ -247,30 +255,49 @@ async def update_seat(request, env, params):
         raise ApiError(404, "No such seat")
     await _fixture_for_member(env, seat["fixture_id"], user["id"])
 
+    holder = seat["assigned_user_id"]
     status = body.get("status", seat["status"])
     if status not in SEAT_STATUSES:
         raise ApiError(400, "status must be one of: " + ", ".join(SEAT_STATUSES))
 
-    # Only the seat's holder may give it up; anyone in the syndicate may take a
-    # seat that is sitting on the bench.
-    holder = seat["assigned_user_id"]
-    if holder and holder != user["id"] and seat["status"] != "on_bench":
-        raise ApiError(403, "That seat belongs to another member")
-
-    if status == "on_bench":
-        assigned_user_id = None
-    elif status == "confirmed":
-        assigned_user_id = body.get("assigned_user_id") or user["id"]
+    if holder:
+        if holder != user["id"]:
+            raise ApiError(403, "That seat belongs to another member")
+        assigned_user_id = None if status == "on_bench" else holder
     else:
-        assigned_user_id = holder or user["id"]
+        if status != "confirmed":
+            raise ApiError(400, "A benched seat can only be claimed (status=confirmed)")
+        assigned_user_id = user["id"]
 
-    resale_price_cents = body.get("resale_price_cents")
-    if status == "resale_listed" and not resale_price_cents:
-        raise ApiError(400, "A resale listing needs a resale_price_cents")
-    if status != "resale_listed":
+    if status == "resale_listed":
+        resale_price_cents = require_int(body, "resale_price_cents", minimum=1)
+    else:
         resale_price_cents = None
 
-    await execute(
+    changed = await _write_seat_if_unchanged(
+        env, seat, status, assigned_user_id, body.get("guest_name"), resale_price_cents
+    )
+    if changed == 0:
+        raise ApiError(
+            409, "This seat changed since you last looked at it -- refresh and retry"
+        )
+    updated = await query_one(
+        env, "SELECT * FROM seat_allocations WHERE id = ?", seat["id"]
+    )
+    return json_response({"seat": updated})
+
+
+async def _write_seat_if_unchanged(
+    env, seat, status, assigned_user_id, guest_name, resale_price_cents
+):
+    """Write a seat's new state, but only if it still looks like ``seat``.
+
+    Returns the number of rows changed. 0 means someone else changed this seat
+    between the caller's read and this write -- two callers racing to claim
+    the same seat can't both succeed, since the loser's WHERE clause matches
+    nothing rather than silently overwriting the winner's write.
+    """
+    return await execute(
         env,
         """
         UPDATE seat_allocations
@@ -279,18 +306,16 @@ async def update_seat(request, env, params):
             guest_name = ?,
             resale_price_cents = ?,
             updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
+        WHERE id = ? AND status = ? AND assigned_user_id IS ?
         """,
         status,
         assigned_user_id,
-        body.get("guest_name"),
-        int(resale_price_cents) if resale_price_cents else None,
+        guest_name,
+        resale_price_cents,
         seat["id"],
+        seat["status"],
+        seat["assigned_user_id"],
     )
-    updated = await query_one(
-        env, "SELECT * FROM seat_allocations WHERE id = ?", seat["id"]
-    )
-    return json_response({"seat": updated})
 
 
 async def list_listings(request, env, params):
@@ -307,7 +332,7 @@ async def list_listings(request, env, params):
         JOIN fixtures f ON f.id = s.fixture_id
         WHERE f.group_id = ?
           AND s.status IN ('on_bench', 'resale_listed')
-          AND f.kickoff_at >= CURRENT_TIMESTAMP
+          AND datetime(f.kickoff_at) >= datetime('now')
         ORDER BY f.kickoff_at, s.seat_number
         """,
         group_id,
@@ -360,16 +385,21 @@ async def create_expense(request, env, params):
     await require_membership(env, group_id, user["id"])
 
     body = await read_json(request)
-    amount_cents, description = require(body, "amount_cents", "description")
-    amount_cents = int(amount_cents)
-    if amount_cents <= 0:
-        raise ApiError(400, "amount_cents must be greater than zero")
+    (description,) = require(body, "description")
+    amount_cents = require_int(body, "amount_cents", minimum=1)
 
     paid_by = body.get("paid_by") or user["id"]
     members = await _members(env, group_id)
     member_ids = [member["id"] for member in members]
 
-    split_between = body.get("split_between") or member_ids
+    split_between = body.get("split_between")
+    if split_between is None:
+        split_between = member_ids
+    elif not isinstance(split_between, list) or not split_between:
+        raise ApiError(400, "split_between must be a non-empty list of member ids")
+    elif len(set(split_between)) != len(split_between):
+        raise ApiError(400, "split_between must not repeat a member id")
+
     unknown = [member for member in split_between if member not in member_ids]
     if unknown:
         raise ApiError(400, "Not members of this syndicate: " + ", ".join(unknown))
@@ -472,6 +502,18 @@ async def get_preferences(request, env, params):
 async def update_preferences(request, env, params):
     user = await current_user(request, env)
     body = await read_json(request)
+
+    notify_3day_checkin = body.get("notify_3day_checkin", True)
+    notify_bench_alerts = body.get("notify_bench_alerts", True)
+    daily_bio_scope = body.get("daily_bio_scope", "home_first")
+
+    if not isinstance(notify_3day_checkin, bool):
+        raise ApiError(400, "notify_3day_checkin must be a boolean")
+    if not isinstance(notify_bench_alerts, bool):
+        raise ApiError(400, "notify_bench_alerts must be a boolean")
+    if daily_bio_scope not in BIO_SCOPES:
+        raise ApiError(400, "daily_bio_scope must be one of: " + ", ".join(BIO_SCOPES))
+
     await execute(
         env,
         """
@@ -484,9 +526,9 @@ async def update_preferences(request, env, params):
             daily_bio_scope = excluded.daily_bio_scope
         """,
         user["id"],
-        bool(body.get("notify_3day_checkin", True)),
-        bool(body.get("notify_bench_alerts", True)),
-        body.get("daily_bio_scope", "home_first"),
+        notify_3day_checkin,
+        notify_bench_alerts,
+        daily_bio_scope,
     )
     prefs = await query_one(
         env, "SELECT * FROM user_notification_prefs WHERE user_id = ?", user["id"]

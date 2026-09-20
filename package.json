@@ -3,7 +3,7 @@
   "private": true,
   "description": "Cloudflare Workers backend for Summit Hearth & Bench (SquadSeats)",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --env development",
     "deploy": "wrangler deploy",
     "migrate:local": "wrangler d1 migrations apply summit-hearth-db --local",
     "migrate:remote": "wrangler d1 migrations apply summit-hearth-db --remote",

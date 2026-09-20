@@ -7,8 +7,8 @@ declared in wrangler.jsonc.
 from js import URL
 
 import handlers
-from db import execute, query
-from responses import ApiError, error_response, json_response
+from db import execute, query, query_one
+from responses import ApiError, error_response, json_response, no_content
 from router import Router
 
 router = Router()
@@ -49,7 +49,10 @@ CORS_HEADERS = {
 
 async def on_fetch(request, env):
     if request.method == "OPTIONS":
-        return json_response({}, status=204, headers=CORS_HEADERS)
+        # A 204 must not carry a body -- a JSON one is rejected by
+        # fetch-compatible Response implementations, which would fail every
+        # real CORS preflight even though the test double accepts it.
+        return _with_cors(no_content())
 
     path = URL.new(request.url).pathname
     handler, params = router.match(request.method, path)
@@ -90,7 +93,19 @@ async def on_scheduled(event, env, ctx):
 
 
 async def _rotate_daily_bio(env):
-    """Schedule the next unscheduled player bio for today."""
+    """Schedule the next unscheduled player bio for today, if one isn't already.
+
+    Idempotent so a retried or duplicate cron invocation doesn't schedule a
+    second bio for the same date -- which would leave bio_of_the_day with
+    more than one row to pick from and no guarantee which one it returns.
+    """
+    already_scheduled = await query_one(
+        env, "SELECT id FROM player_bios WHERE scheduled_date = DATE('now')"
+    )
+    if already_scheduled:
+        print("Daily bio rotation skipped: a bio is already scheduled for today")
+        return
+
     changed = await execute(
         env,
         """
@@ -108,10 +123,13 @@ async def _rotate_daily_bio(env):
 
 
 async def _send_checkin_reminders(env):
-    """Find members who have not answered for a fixture three days out.
+    """Log fixtures that still have seats sitting on the bench three days out.
 
-    Delivering the push notification itself is not wired up yet; this logs the
-    seats still sitting on the bench so the job is observable in the meantime.
+    This is fixture-level, not member-level: benching a seat clears its
+    assigned_user_id, so there is nothing here yet that names who needs a
+    nudge or consults their notify_3day_checkin preference. Modeling who
+    released a seat, and actually delivering a notification, are both still
+    open -- this only makes the cron's work observable in the meantime.
     """
     pending = await query(
         env,
@@ -126,7 +144,7 @@ async def _send_checkin_reminders(env):
     )
     for row in pending:
         print(
-            "Check-in reminder due: {} seat(s) on the bench for {}".format(
+            "Bench alert: {} seat(s) still open for {} in 3 days".format(
                 row["benched"], row["opponent"]
             )
         )

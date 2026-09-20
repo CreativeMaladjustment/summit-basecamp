@@ -64,3 +64,22 @@ def require(body, *fields):
     if missing:
         raise ApiError(400, "Missing required field(s): " + ", ".join(missing))
     return [body[field] for field in fields]
+
+
+def require_int(body, field, minimum=None):
+    """Pull an integer field out of a parsed body, or raise ApiError(400).
+
+    Rejects a missing value and a non-numeric one (both would otherwise reach
+    a bare ``int()`` call downstream and surface as a 500), and rejects JSON
+    booleans, which Python's ``int()`` would otherwise silently accept as 0/1.
+    """
+    value = body.get(field)
+    if value is None or isinstance(value, bool):
+        raise ApiError(400, field + " must be an integer")
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        raise ApiError(400, field + " must be an integer")
+    if minimum is not None and value < minimum:
+        raise ApiError(400, "{} must be at least {}".format(field, minimum))
+    return value
