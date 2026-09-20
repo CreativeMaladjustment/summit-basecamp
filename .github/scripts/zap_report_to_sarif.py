@@ -25,13 +25,10 @@ def first_reference_url(reference_text: str) -> str:
 
 def build_rule(alert: dict, risk_code: str) -> dict:
     rule_name = alert.get("name") or "ZAP alert"
+    plugin_id = str(alert.get("pluginid") or alert.get("pluginId") or alert.get("id") or "").strip()
+    rule_id = f"{plugin_id}:{rule_name}" if plugin_id else rule_name
     rule = {
-        "id": str(
-            alert.get("pluginid")
-            or alert.get("pluginId")
-            or alert.get("id")
-            or rule_name
-        ),
+        "id": rule_id,
         "name": rule_name,
         "shortDescription": {"text": rule_name},
         "fullDescription": {"text": alert.get("desc", rule_name)},

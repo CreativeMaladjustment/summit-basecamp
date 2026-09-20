@@ -13,7 +13,7 @@ SPEC.loader.exec_module(MODULE)
 
 
 class ZapReportToSarifTests(unittest.TestCase):
-    def test_main_converts_multiple_sites_and_reuses_canonical_rule_name(self):
+    def test_main_converts_multiple_sites_with_distinct_rule_ids(self):
         report = {
             "site": [
                 {
@@ -57,10 +57,12 @@ class ZapReportToSarifTests(unittest.TestCase):
 
         rules = sarif["runs"][0]["tool"]["driver"]["rules"]
         results = sarif["runs"][0]["results"]
-        self.assertEqual(len(rules), 1)
-        self.assertEqual(rules[0]["name"], "First name")
+        self.assertEqual(len(rules), 2)
+        self.assertEqual({rule["id"] for rule in rules}, {"10001:First name", "10001:Second name"})
+        self.assertEqual(results[0]["ruleId"], "10001:First name")
+        self.assertEqual(results[1]["ruleId"], "10001:Second name")
         self.assertEqual(results[0]["message"]["text"], "First name\nParameter: a")
-        self.assertEqual(results[1]["message"]["text"], "First name\nEvidence: match")
+        self.assertEqual(results[1]["message"]["text"], "Second name\nEvidence: match")
 
     def test_build_rule_extracts_help_uri(self):
         rule = MODULE.build_rule(
@@ -112,7 +114,7 @@ class ZapReportToSarifTests(unittest.TestCase):
             sarif = json.loads(output_path.read_text(encoding="utf-8"))
 
         result = sarif["runs"][0]["results"][0]
-        self.assertEqual(result["ruleId"], "40004")
+        self.assertEqual(result["ruleId"], "40004:Single site")
         self.assertEqual(
             result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
             "https://solo.example/path",
