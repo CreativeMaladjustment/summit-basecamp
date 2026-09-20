@@ -8,7 +8,7 @@ from js import URL
 
 import handlers
 from db import execute, query, query_one
-from responses import ApiError, error_response, json_response, no_content
+from responses import ApiError, error_response, no_content
 from router import Router
 
 router = Router()
