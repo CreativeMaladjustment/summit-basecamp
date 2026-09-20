@@ -129,7 +129,7 @@ jobs:
           python3 .github/scripts/zap_report_to_sarif.py zap-out/report.json zap-out/report.sarif
 
       - name: Upload SARIF
-        if: ${{ always() && !github.event.pull_request.head.repo.fork && hashFiles('zap-out/report.sarif') != '' }}
+        if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) && hashFiles('zap-out/report.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         with:
           sarif_file: zap-out/report.sarif
@@ -209,7 +209,7 @@ jobs:
           python3 .github/scripts/zap_report_to_sarif.py zap-out/report.json zap-out/report.sarif
 
       - name: Upload SARIF
-        if: ${{ always() && !github.event.pull_request.head.repo.fork && hashFiles('zap-out/report.sarif') != '' }}
+        if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) && hashFiles('zap-out/report.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         with:
           sarif_file: zap-out/report.sarif

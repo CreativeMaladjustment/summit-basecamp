@@ -41,8 +41,8 @@ def build_rule(alert: dict, risk_code: str) -> dict:
     return rule
 
 
-def build_result(rule_id: str, rule_name: str, risk_code: str, site_uri: str, alert: dict, instance: dict) -> dict:
-    message_parts = [rule_name]
+def build_result(rule: dict, risk_code: str, site_uri: str, alert: dict, instance: dict) -> dict:
+    message_parts = [rule["name"]]
     if instance.get("param"):
         message_parts.append(f"Parameter: {instance['param']}")
     if instance.get("evidence"):
@@ -51,7 +51,7 @@ def build_result(rule_id: str, rule_name: str, risk_code: str, site_uri: str, al
         message_parts.append(str(alert["otherinfo"]))
 
     result = {
-        "ruleId": rule_id,
+        "ruleId": rule["id"],
         "level": LEVEL_MAP.get(risk_code, "warning"),
         "message": {"text": "\n".join(message_parts)},
     }
@@ -69,12 +69,7 @@ def build_result(rule_id: str, rule_name: str, risk_code: str, site_uri: str, al
     return result
 
 
-def main() -> int:
-    if len(sys.argv) != 3:
-        print("usage: zap_report_to_sarif.py <input-json> <output-sarif>", file=sys.stderr)
-        return 2
-
-    input_path, output_path = sys.argv[1], sys.argv[2]
+def convert_report(input_path: str, output_path: str) -> int:
     with open(input_path, "r", encoding="utf-8") as fh:
         report = json.load(fh)
 
@@ -89,7 +84,7 @@ def main() -> int:
             rules.setdefault(rule["id"], rule)
             instances = alert.get("instances") or [{}]
             for instance in instances:
-                results.append(build_result(rule["id"], rule["name"], risk_code, site_uri, alert, instance))
+                results.append(build_result(rules[rule["id"]], risk_code, site_uri, alert, instance))
 
     sarif = {
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
@@ -112,6 +107,14 @@ def main() -> int:
         json.dump(sarif, fh)
 
     return 0
+
+
+def main() -> int:
+    if len(sys.argv) != 3:
+        print("usage: zap_report_to_sarif.py <input-json> <output-sarif>", file=sys.stderr)
+        return 2
+
+    return convert_report(sys.argv[1], sys.argv[2])
 
 
 if __name__ == "__main__":
