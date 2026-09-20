@@ -123,7 +123,9 @@ jobs:
           python-version: '3.12'
 
       - name: Install Semgrep
-        run: pip install --disable-pip-version-check semgrep==1.86.0
+        run: |
+          pip install --disable-pip-version-check 'setuptools<81'
+          pip install --disable-pip-version-check semgrep==1.86.0
 
       - name: Scan
         id: scan
