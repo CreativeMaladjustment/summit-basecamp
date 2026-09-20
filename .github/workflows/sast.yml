@@ -220,6 +220,7 @@ jobs:
           set -euo pipefail
           fail=0
           for result in \
+            "detect=${{ needs.detect.result }}" \
             "codeql=${{ needs.codeql.result }}" \
             "semgrep=${{ needs.semgrep.result }}" \
             "secrets=${{ needs.secrets.result }}" \
