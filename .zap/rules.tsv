@@ -1,0 +1,9 @@
+# ZAP baseline rule overrides, one rule per line, tab separated:
+#
+#   <rule id>	<WARN|IGNORE|FAIL>	<comment>
+#
+# Rule ids are the numbers in the scan report. Nothing is overridden yet; add a
+# line here when a rule fires on something that is deliberate, and say why.
+#
+# Example:
+# 10035	IGNORE	HSTS is set by Cloudflare, not by the origin.
