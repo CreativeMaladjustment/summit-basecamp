@@ -15,6 +15,12 @@ def ensure_list(value):
     return [value]
 
 
+def ensure_alert_list(value):
+    if isinstance(value, dict) and "alertitem" in value:
+        return ensure_list(value["alertitem"])
+    return ensure_list(value)
+
+
 def first_reference_url(reference_text: str) -> str:
     for candidate in str(reference_text).splitlines():
         candidate = candidate.strip()
@@ -83,7 +89,7 @@ def convert_report(input_path: str, output_path: str) -> int:
 
     for site in ensure_list(report.get("site", [])):
         site_uri = site.get("@name", "")
-        for alert in ensure_list(site.get("alerts", [])):
+        for alert in ensure_alert_list(site.get("alerts", [])):
             risk_code = str(alert.get("riskcode") or alert.get("riskCode") or "0")
             rule = build_rule(alert, risk_code)
             rules.setdefault(rule["id"], rule)
