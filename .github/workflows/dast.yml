@@ -126,98 +126,7 @@ jobs:
         if: ${{ always() && hashFiles('zap-out/report.json') != '' }}
         shell: bash
         run: |
-          python3 <<'PY'
-          import json
-
-          with open("zap-out/report.json", "r", encoding="utf-8") as fh:
-              report = json.load(fh)
-
-          level_map = {"0": "note", "1": "warning", "2": "error", "3": "error"}
-          severity_map = {"0": "0.0", "1": "3.3", "2": "6.7", "3": "9.8"}
-          rules = {}
-          results = []
-
-          for site in report.get("site", []):
-              site_uri = site.get("@name", "")
-              for alert in site.get("alerts", []):
-                  rule_id = str(
-                      alert.get("pluginid")
-                      or alert.get("pluginId")
-                      or alert.get("id")
-                      or alert.get("name")
-                      or "zap-alert"
-                  )
-                  rule_name = alert.get("name", rule_id)
-                  risk_code = str(alert.get("riskcode") or alert.get("riskCode") or "0")
-                  help_uri = ""
-                  for candidate in str(alert.get("reference", "")).splitlines():
-                      candidate = candidate.strip()
-                      if candidate:
-                          help_uri = candidate.split()[0]
-                          break
-                  if rule_id not in rules:
-                      rule = {
-                          "id": rule_id,
-                          "name": rule_name,
-                          "shortDescription": {"text": rule_name},
-                          "fullDescription": {"text": alert.get("desc", rule_name)},
-                          "help": {
-                              "text": "\n\n".join(
-                                  part for part in [alert.get("solution", ""), alert.get("otherinfo", "")] if part
-                              )
-                              or alert.get("desc", rule_name)
-                          },
-                          "properties": {"security-severity": severity_map.get(risk_code, "3.3")},
-                      }
-                      if help_uri:
-                          rule["helpUri"] = help_uri
-                      rules[rule_id] = rule
-
-                  instances = alert.get("instances") or [{}]
-                  for instance in instances:
-                      location_uri = instance.get("uri") or site_uri
-                      message_parts = [rule_name]
-                      if instance.get("param"):
-                          message_parts.append(f"Parameter: {instance['param']}")
-                      if instance.get("evidence"):
-                          message_parts.append(f"Evidence: {instance['evidence']}")
-                      if alert.get("otherinfo"):
-                          message_parts.append(str(alert["otherinfo"]))
-                      result = {
-                          "ruleId": rule_id,
-                          "level": level_map.get(risk_code, "warning"),
-                          "message": {"text": "\n".join(message_parts)},
-                      }
-                      if location_uri:
-                          result["locations"] = [
-                              {
-                                  "physicalLocation": {
-                                      "artifactLocation": {"uri": location_uri}
-                                  }
-                              }
-                          ]
-                      results.append(result)
-
-          sarif = {
-              "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-              "version": "2.1.0",
-              "runs": [
-                  {
-                      "tool": {
-                          "driver": {
-                              "name": "OWASP ZAP",
-                              "informationUri": "https://www.zaproxy.org/",
-                              "rules": list(rules.values()),
-                          }
-                      },
-                      "results": results,
-                  }
-              ],
-          }
-
-          with open("zap-out/report.sarif", "w", encoding="utf-8") as fh:
-              json.dump(sarif, fh)
-          PY
+          python3 .github/scripts/zap_report_to_sarif.py zap-out/report.json zap-out/report.sarif
 
       - name: Upload SARIF
         if: ${{ always() && !github.event.pull_request.head.repo.fork && hashFiles('zap-out/report.sarif') != '' }}
@@ -267,6 +176,8 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: ZAP baseline scan
         id: zap
@@ -295,98 +206,7 @@ jobs:
         if: ${{ always() && hashFiles('zap-out/report.json') != '' }}
         shell: bash
         run: |
-          python3 <<'PY'
-          import json
-
-          with open("zap-out/report.json", "r", encoding="utf-8") as fh:
-              report = json.load(fh)
-
-          level_map = {"0": "note", "1": "warning", "2": "error", "3": "error"}
-          severity_map = {"0": "0.0", "1": "3.3", "2": "6.7", "3": "9.8"}
-          rules = {}
-          results = []
-
-          for site in report.get("site", []):
-              site_uri = site.get("@name", "")
-              for alert in site.get("alerts", []):
-                  rule_id = str(
-                      alert.get("pluginid")
-                      or alert.get("pluginId")
-                      or alert.get("id")
-                      or alert.get("name")
-                      or "zap-alert"
-                  )
-                  rule_name = alert.get("name", rule_id)
-                  risk_code = str(alert.get("riskcode") or alert.get("riskCode") or "0")
-                  help_uri = ""
-                  for candidate in str(alert.get("reference", "")).splitlines():
-                      candidate = candidate.strip()
-                      if candidate:
-                          help_uri = candidate.split()[0]
-                          break
-                  if rule_id not in rules:
-                      rule = {
-                          "id": rule_id,
-                          "name": rule_name,
-                          "shortDescription": {"text": rule_name},
-                          "fullDescription": {"text": alert.get("desc", rule_name)},
-                          "help": {
-                              "text": "\n\n".join(
-                                  part for part in [alert.get("solution", ""), alert.get("otherinfo", "")] if part
-                              )
-                              or alert.get("desc", rule_name)
-                          },
-                          "properties": {"security-severity": severity_map.get(risk_code, "3.3")},
-                      }
-                      if help_uri:
-                          rule["helpUri"] = help_uri
-                      rules[rule_id] = rule
-
-                  instances = alert.get("instances") or [{}]
-                  for instance in instances:
-                      location_uri = instance.get("uri") or site_uri
-                      message_parts = [rule_name]
-                      if instance.get("param"):
-                          message_parts.append(f"Parameter: {instance['param']}")
-                      if instance.get("evidence"):
-                          message_parts.append(f"Evidence: {instance['evidence']}")
-                      if alert.get("otherinfo"):
-                          message_parts.append(str(alert["otherinfo"]))
-                      result = {
-                          "ruleId": rule_id,
-                          "level": level_map.get(risk_code, "warning"),
-                          "message": {"text": "\n".join(message_parts)},
-                      }
-                      if location_uri:
-                          result["locations"] = [
-                              {
-                                  "physicalLocation": {
-                                      "artifactLocation": {"uri": location_uri}
-                                  }
-                              }
-                          ]
-                      results.append(result)
-
-          sarif = {
-              "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-              "version": "2.1.0",
-              "runs": [
-                  {
-                      "tool": {
-                          "driver": {
-                              "name": "OWASP ZAP",
-                              "informationUri": "https://www.zaproxy.org/",
-                              "rules": list(rules.values()),
-                          }
-                      },
-                      "results": results,
-                  }
-              ],
-          }
-
-          with open("zap-out/report.sarif", "w", encoding="utf-8") as fh:
-              json.dump(sarif, fh)
-          PY
+          python3 .github/scripts/zap_report_to_sarif.py zap-out/report.json zap-out/report.sarif
 
       - name: Upload SARIF
         if: ${{ always() && !github.event.pull_request.head.repo.fork && hashFiles('zap-out/report.sarif') != '' }}
