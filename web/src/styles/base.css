@@ -1,5 +1,13 @@
 *, *::before, *::after { box-sizing: border-box; }
 
+/* Every screen and state in this app is pre-rendered and toggled by the
+   `hidden` attribute (src/app.js sets el.hidden, never inline styles or a
+   class). An element-specific `display` rule (e.g. .sheet-backdrop's
+   `display: flex`) is an author style and always beats the UA stylesheet's
+   default `[hidden] { display: none }`, so without this override a "hidden"
+   sheet backdrop stays on screen, stacked, intercepting every click. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   -webkit-font-smoothing: antialiased;
