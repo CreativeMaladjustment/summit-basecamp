@@ -190,7 +190,11 @@ jobs:
         run: |
           set -euo pipefail
           fail=0
-          for result in "api=${{ needs.api.result }}" "web=${{ needs.web.result }}"; do
+          for result in \
+            "detect=${{ needs.detect.result }}" \
+            "api=${{ needs.api.result }}" \
+            "web=${{ needs.web.result }}"
+          do
             name="${result%%=*}"
             state="${result#*=}"
             echo "- $name: $state" >> "$GITHUB_STEP_SUMMARY"

@@ -65,7 +65,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && 'none' || 'write' }}
+      # Must be a static value -- permissions do not accept expressions.
+      # The actual fork guard is on the upload-sarif step's own `if:` below.
+      security-events: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -173,7 +175,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && 'none' || 'write' }}
+      # Must be a static value -- permissions do not accept expressions.
+      # The actual fork guard is on the upload-sarif step's own `if:` below.
+      security-events: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
