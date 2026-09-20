@@ -23,6 +23,7 @@ jobs:
     outputs:
       codeql-languages: ${{ steps.detect.outputs.codeql-languages }}
       has-source: ${{ steps.detect.outputs.has-source }}
+      has-manifests: ${{ steps.detect.outputs.has-manifests }}
     steps:
       - uses: actions/checkout@v4
 
@@ -54,6 +55,23 @@ jobs:
           else
             echo "has-source=false" >> "$GITHUB_OUTPUT"
             echo "No Python or JavaScript/TypeScript sources found — CodeQL skipped." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # Dependency review needs a dependency manifest to compare, and it
+          # errors out rather than no-opping when there is nothing to review.
+          manifests=false
+          for name in package.json package-lock.json yarn.lock pnpm-lock.yaml \
+            'requirements*.txt' pyproject.toml Pipfile poetry.lock go.mod \
+            Cargo.toml Gemfile composer.json
+          do
+            if have "$name"; then
+              manifests=true
+              break
+            fi
+          done
+          echo "has-manifests=$manifests" >> "$GITHUB_OUTPUT"
+          if [ "$manifests" = false ]; then
+            echo "No dependency manifests found — dependency review skipped." >> "$GITHUB_STEP_SUMMARY"
           fi
 
   codeql:
@@ -169,7 +187,10 @@ jobs:
 
   dependency-review:
     name: Dependency review
-    if: github.event_name == 'pull_request'
+    needs: detect
+    # Needs the repository's Dependency graph to be enabled
+    # (Settings -> Code security -> Dependency graph), and something to review.
+    if: github.event_name == 'pull_request' && needs.detect.outputs.has-manifests == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read

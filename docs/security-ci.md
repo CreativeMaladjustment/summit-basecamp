@@ -22,7 +22,11 @@ query suite, and publishes to the Security tab. Semgrep runs `p/default` and
 `p/secrets` and fails the build only on `ERROR` severity, so a new finding has
 to be high confidence before it blocks a pull request. Gitleaks walks the full
 commit history, not just the diff, so a secret committed earlier in a branch is
-still caught. Dependency review fails on `high` and above.
+still caught. Dependency review fails on `high` and above, and runs only once a dependency
+manifest exists — it errors out rather than passing quietly when there is
+nothing to review. It also needs the repository's **Dependency graph** to be
+turned on, under Settings → Code security. Turn it on before the first
+`package.json` or `pyproject.toml` lands, or the check will start failing then.
 
 Everything uploads SARIF, so findings land as code scanning alerts and get
 annotated inline on the diff. Uploads are skipped for pull requests from forks,
