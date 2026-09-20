@@ -81,3 +81,17 @@ Reports are uploaded as build artifacts (`zap-local-target`,
 
 Rule ids are the numbers in the scan report. Nothing is overridden yet. When a
 rule fires on something deliberate, add a line and say why.
+
+## A note on deployment
+
+None of these workflows deploy anything. The DAST local target is served from
+the runner's own loopback and the deployed-target job only scans a URL that
+already exists, so no job here needs deployment credentials.
+
+Any workflow that *does* deploy must run under the GitHub environment named
+`shb`, which holds the deployment variables and secrets. Put `environment: shb`
+on the deploying job. Two things to watch for: if that environment carries
+protection rules such as required reviewers, a job referencing it pauses until
+someone approves — so keep it off fast pull request checks — and its variables
+are not visible to a job-level `if:`, which is evaluated before the environment
+is resolved.
