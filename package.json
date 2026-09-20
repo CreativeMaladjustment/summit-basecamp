@@ -1,0 +1,16 @@
+{
+  "name": "summit-hearth-api",
+  "private": true,
+  "description": "Cloudflare Workers backend for Summit Hearth & Bench (SquadSeats)",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "migrate:local": "wrangler d1 migrations apply summit-hearth-db --local",
+    "migrate:remote": "wrangler d1 migrations apply summit-hearth-db --remote",
+    "seed:local": "wrangler d1 execute summit-hearth-db --local --file=seed/dev_seed.sql",
+    "test": "python3 -m unittest discover -s tests -v"
+  },
+  "devDependencies": {
+    "wrangler": "^4.135.0"
+  }
+}
