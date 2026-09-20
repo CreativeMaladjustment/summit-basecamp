@@ -73,10 +73,13 @@ jobs:
 
       - name: terraform validate
         shell: bash
+        env:
+          ROOT_MODULES: ${{ needs.detect.outputs.root-modules }}
         run: |
           set -euo pipefail
           failed=0
-          for dir in $(echo '${{ needs.detect.outputs.root-modules }}' | jq -r '.[]'); do
+          while IFS= read -r dir_json; do
+            dir="$(jq -r . <<<"$dir_json")"
             echo "::group::validate $dir"
             # -backend=false keeps this from needing any cloud credentials.
             if terraform -chdir="$dir" init -backend=false -input=false -no-color \
@@ -86,7 +89,7 @@ jobs:
               failed=1
             fi
             echo "::endgroup::"
-          done
+          done < <(jq -cr '.[]' <<<"$ROOT_MODULES")
           exit "$failed"
 
   tflint:
@@ -196,6 +199,7 @@ jobs:
           set -euo pipefail
           fail=0
           for result in \
+            "detect=${{ needs.detect.result }}" \
             "fmt-validate=${{ needs.fmt-validate.result }}" \
             "tflint=${{ needs.tflint.result }}" \
             "trivy=${{ needs.trivy.result }}" \

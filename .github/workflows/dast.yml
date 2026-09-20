@@ -22,6 +22,9 @@ concurrency:
   group: dast-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  ZAPROXY_IMAGE: ghcr.io/zaproxy/zaproxy:stable@sha256:781a2bdaea47324e7bab583e2263f21d257b0aee61ed51521a5be45f5f5081ef
+
 jobs:
   detect:
     name: Detect static site
@@ -60,8 +63,24 @@ jobs:
     needs: detect
     if: needs.detect.outputs.static-dir != ''
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && 'none' || 'write' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare sanitized scan target
+        id: target
+        shell: bash
+        env:
+          STATIC_DIR: ${{ needs.detect.outputs.static-dir }}
+        run: |
+          set -euo pipefail
+          site_dir="$(mktemp -d /tmp/dast-site.XXXXXX)"
+          tar -C "$STATIC_DIR" --exclude='.git' -cf - . | tar -C "$site_dir" -xf -
+          echo "site-dir=$site_dir" >> "$GITHUB_OUTPUT"
 
       - name: Serve the site
         shell: bash
@@ -69,7 +88,7 @@ jobs:
           set -euo pipefail
           nohup python3 -m http.server 8080 \
             --bind 127.0.0.1 \
-            --directory '${{ needs.detect.outputs.static-dir }}' \
+            --directory '${{ steps.target.outputs.site-dir }}' \
             > /tmp/static-server.log 2>&1 &
           for _ in $(seq 1 30); do
             if curl -fsS -o /dev/null http://127.0.0.1:8080/; then
@@ -93,7 +112,7 @@ jobs:
 
           docker run --rm --network host \
             -v "$PWD/zap-out:/zap/wrk/:rw" \
-            ghcr.io/zaproxy/zaproxy:stable \
+            "$ZAPROXY_IMAGE" \
             zap-baseline.py \
               -t http://127.0.0.1:8080 \
               -c rules.tsv \
@@ -102,6 +121,19 @@ jobs:
               -w report.md \
               -a
           echo "exit-code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Convert report to SARIF
+        if: ${{ always() && hashFiles('zap-out/report.json') != '' }}
+        shell: bash
+        run: |
+          python3 .github/scripts/zap_report_to_sarif.py zap-out/report.json zap-out/report.sarif
+
+      - name: Upload SARIF
+        if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) && hashFiles('zap-out/report.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        with:
+          sarif_file: zap-out/report.sarif
+          category: zap-local-target
 
       - name: Report
         if: always()
@@ -139,8 +171,13 @@ jobs:
     # safe against a shared environment.
     if: ${{ vars.DAST_TARGET_URL != '' || inputs.target-url != '' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && 'none' || 'write' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: ZAP baseline scan
         id: zap
@@ -155,7 +192,7 @@ jobs:
 
           docker run --rm \
             -v "$PWD/zap-out:/zap/wrk/:rw" \
-            ghcr.io/zaproxy/zaproxy:stable \
+            "$ZAPROXY_IMAGE" \
             zap-baseline.py \
               -t "$TARGET" \
               -c rules.tsv \
@@ -164,6 +201,19 @@ jobs:
               -w report.md \
               -a
           echo "exit-code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Convert report to SARIF
+        if: ${{ always() && hashFiles('zap-out/report.json') != '' }}
+        shell: bash
+        run: |
+          python3 .github/scripts/zap_report_to_sarif.py zap-out/report.json zap-out/report.sarif
+
+      - name: Upload SARIF
+        if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) && hashFiles('zap-out/report.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        with:
+          sarif_file: zap-out/report.sarif
+          category: zap-deployed-target
 
       - name: Report
         if: always()
@@ -203,6 +253,7 @@ jobs:
           set -euo pipefail
           fail=0
           for result in \
+            "detect=${{ needs.detect.result }}" \
             "local-target=${{ needs.local-target.result }}" \
             "deployed-target=${{ needs.deployed-target.result }}"
           do
