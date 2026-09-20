@@ -121,7 +121,7 @@ def convert_report(input_path: str, output_path: str) -> int:
     }
 
     with open(output_path, "w", encoding="utf-8") as fh:
-        json.dump(sarif, fh)
+        json.dump(sarif, fh, sort_keys=True, separators=(",", ":"))
 
     return 0
 
