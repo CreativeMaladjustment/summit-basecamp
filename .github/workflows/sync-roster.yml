@@ -1,0 +1,91 @@
+name: Sync roster
+
+# Runs the roster/fixture/opponent/headshot sync (src/sync.py) against the
+# deployed Worker, by calling POST /api/admin/sync (src/handlers.trigger_sync)
+# -- there is no Cloudflare-side cron for this any more (see the comment on
+# "triggers" in wrangler.jsonc); it runs here so a run's logs and history
+# live in GitHub Actions like everything else in this repo, rather than in
+# the Worker's own cron log.
+#
+# Fires two ways:
+#   - after every successful "Deploy" run on main, i.e. after a merge that
+#     actually shipped -- a failed or cancelled deploy leaves the previous,
+#     already-synced Worker in place, so there is nothing new to sync
+#     against and this skips.
+#   - on its own weekly schedule, so the roster/fixtures/headshots stay
+#     current even on a week nothing in this repo changes. Mondays 5am UTC,
+#     the same cadence the removed Cloudflare cron used to run this on.
+#
+# Needs two things set once, in the same "shb" GitHub environment deploy.yml
+# uses:
+#   - secret CF_SYNC_ADMIN_TOKEN: any random string. Set the same value on
+#     the Worker with `wrangler secret put SYNC_ADMIN_TOKEN` -- the two must
+#     match exactly, or every run here gets a 401.
+#   - variable CF_API_BASE_URL: the deployed Worker's base URL (its
+#     workers.dev URL, or a custom domain if one is routed to it), no
+#     trailing slash.
+
+on:
+  workflow_run:
+    workflows: ["Deploy"]
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One sync at a time; never cancel one already in flight -- a half-run
+  # sync would otherwise leave the diff-and-write logic in sync.py part
+  # applied.
+  group: sync-roster
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Trigger roster sync
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name != 'workflow_run'
+      || github.event.workflow_run.conclusion == 'success'
+    environment: shb
+    steps:
+      - name: Check required configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -z "${{ vars.CF_API_BASE_URL }}" ] && missing+=("the CF_API_BASE_URL repository/environment variable")
+          [ -z "${{ secrets.CF_SYNC_ADMIN_TOKEN }}" ] && missing+=("the CF_SYNC_ADMIN_TOKEN secret")
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf '::error::Cannot trigger the roster sync -- missing: %s\n' "$(IFS=', '; echo "${missing[*]}")"
+            exit 1
+          fi
+
+      - name: POST /api/admin/sync
+        shell: bash
+        env:
+          API_BASE_URL: ${{ vars.CF_API_BASE_URL }}
+          SYNC_ADMIN_TOKEN: ${{ secrets.CF_SYNC_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          status="$(curl -sS -o /tmp/sync-response.json -w '%{http_code}' \
+            -X POST "${API_BASE_URL%/}/api/admin/sync" \
+            -H "Authorization: Bearer ${SYNC_ADMIN_TOKEN}")"
+
+          {
+            echo "### Roster sync (HTTP $status)"
+            echo '```json'
+            cat /tmp/sync-response.json
+            echo
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$status" -ge 300 ]; then
+            echo "::error::POST /api/admin/sync failed with status $status"
+            cat /tmp/sync-response.json
+            exit 1
+          fi

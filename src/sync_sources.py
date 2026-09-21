@@ -18,7 +18,13 @@ from js import fetch
 # stops emitting JSON-LD, `_extract_json_ld` below returns an empty list and
 # the sync logs a warning instead of failing the whole job -- selectors here
 # are expected to need revisiting; see docs/requirements.md.
-NWSL_TEAM_SLUG = "cbfcacbef5bc4a278442c00926ac9ebc/denver-summit"
+#
+# The roster tab (fetch_nwsl_roster below) is different: verified against a
+# real snapshot of the page on 2026-09-21, it renders no JSON-LD at all --
+# it's a plain Next.js table -- so that one scrapes the table markup
+# directly instead. The slug also used to be missing "-fc"
+# (.../denver-summit/... 404s; the real path is .../denver-summit-fc/...).
+NWSL_TEAM_SLUG = "cbfcacbef5bc4a278442c00926ac9ebc/denver-summit-fc"
 NWSL_SCHEDULE_URL = "https://www.nwslsoccer.com/teams/{}/schedule".format(NWSL_TEAM_SLUG)
 NWSL_ROSTER_URL = "https://www.nwslsoccer.com/teams/{}/roster".format(NWSL_TEAM_SLUG)
 
@@ -112,37 +118,74 @@ async def fetch_nwsl_schedule(env=None):
     return fixtures
 
 
+# One row per player in the roster table. Anchored on the headshot cell's
+# data-player-id -- a semantic data attribute, not a styled-components
+# class hash (the ...StyledTr--1ibdud4 gpEqPQ... classes on the same <tr>
+# are regenerated on every nwslsoccer.com deploy and would break this the
+# next time their build runs). Everything else is pulled out of the row
+# slice that starts at each marker and runs to the next one, rather than a
+# single monolithic regex, so one missing/reordered cell doesn't fail every
+# player on the page.
+_ROSTER_ROW_START_RE = re.compile(r'data-player-id="nwsl::Football_Player::[a-f0-9]+"')
+_ROSTER_NAME_RE = re.compile(
+    r'd3w-player-name--first">([^<]*)</span><span class="[^"]*d3w-player-name--last">([^<]*)</span>'
+)
+_ROSTER_HREF_RE = re.compile(r'href="(https://www\.nwslsoccer\.com/players/[^"]+)"')
+_ROSTER_JERSEY_RE = re.compile(r'class="[^"]*\bjersey\b[^"]*"[^>]*>([^<]*)</td>')
+_ROSTER_POSITION_RE = re.compile(r'class="[^"]*\bposition\b[^"]*"[^>]*>([^<]*)</td>')
+
+# The roster table spells positions out in full (Goalkeeper, Defender, ...);
+# roster_players.position stores the short code used everywhere else in the
+# app. An unrecognised label (a new position the club adds, a wording
+# change) passes through as-is rather than being dropped, so it's still
+# visible in the data instead of silently vanishing.
+_POSITION_CODES = {
+    "goalkeeper": "GK",
+    "defender": "DEF",
+    "midfielder": "MID",
+    "forward": "FWD",
+}
+
+
 async def fetch_nwsl_roster(env=None):
     """Denver Summit's current roster, from the team roster page.
 
     Returns a list of dicts: source_ref, name, jersey_number, position.
-    Same JSON-LD approach as the schedule -- an ItemList of Person entries,
-    where present; falls back to raising SyncSourceError if the page's
-    structured data does not include one, so a markup change degrades to a
-    skipped roster sync rather than corrupting existing rows.
+
+    The roster tab renders no JSON-LD (verified against a real snapshot of
+    the page on 2026-09-21) -- it's a server-rendered Next.js table, one
+    <tr> per player -- so this scrapes that table directly. Falls back to
+    raising SyncSourceError when no player rows are found at all, so a
+    markup change degrades to a skipped roster sync rather than corrupting
+    existing rows.
     """
     html = await _get_text(NWSL_ROSTER_URL)
+    starts = [match.start() for match in _ROSTER_ROW_START_RE.finditer(html)]
     players = []
-    for block in _extract_json_ld(html):
-        if block.get("@type") != "ItemList":
+    for index, start in enumerate(starts):
+        end = starts[index + 1] if index + 1 < len(starts) else len(html)
+        row = html[start:end]
+
+        name_match = _ROSTER_NAME_RE.search(row)
+        if name_match is None:
             continue
-        for item in block.get("itemListElement", []):
-            person = item.get("item", item)
-            if person.get("@type") != "Person":
-                continue
-            name = person.get("name")
-            if not name:
-                continue
-            players.append(
-                {
-                    "source_ref": person.get("url") or name,
-                    "name": name,
-                    "jersey_number": _to_int(person.get("jobTitle")),
-                    "position": person.get("roleName") or "",
-                }
-            )
+        name = "{} {}".format(name_match.group(1).strip(), name_match.group(2).strip())
+
+        href_match = _ROSTER_HREF_RE.search(row)
+        jersey_match = _ROSTER_JERSEY_RE.search(row)
+        position_match = _ROSTER_POSITION_RE.search(row)
+        position_raw = position_match.group(1).strip() if position_match else ""
+
+        players.append(
+            {
+                "source_ref": href_match.group(1) if href_match else name,
+                "name": name,
+                "jersey_number": _to_int(jersey_match.group(1)) if jersey_match else None,
+                "position": _POSITION_CODES.get(position_raw.lower(), position_raw),
+            }
+        )
     if not players:
-        raise SyncSourceError("no roster ItemList found on the roster page")
+        raise SyncSourceError("no roster rows found on the roster page")
     return players
 
 

@@ -6,8 +6,11 @@
   "compatibility_flags": ["python_workers"],
 
   // Non-secret config only. Secrets (SESSION_HMAC_SECRET, GOOGLE_CLIENT_ID,
-  // APPLE_CLIENT_ID) are set with `wrangler secret put <NAME>` and are never
-  // committed here.
+  // APPLE_CLIENT_ID, SYNC_ADMIN_TOKEN) are set with `wrangler secret put
+  // <NAME>` and are never committed here. SYNC_ADMIN_TOKEN authenticates
+  // POST /api/admin/sync (see src/handlers.trigger_sync); it must match the
+  // CF_SYNC_ADMIN_TOKEN secret set on the GitHub repo, which
+  // .github/workflows/sync-roster.yml sends as a bearer token.
   "vars": {
     "ENVIRONMENT": "production"
   },
@@ -32,11 +35,13 @@
     }
   ],
 
+  // Two daily jobs only -- the weekly roster/fixture/headshot sync used to
+  // be a third cron here, but now runs via POST /api/admin/sync, triggered
+  // by .github/workflows/sync-roster.yml instead (see src/entry.py).
   "triggers": {
     "crons": [
       "0 8 * * *",
-      "0 10 * * *",
-      "0 5 * * 1"
+      "0 10 * * *"
     ]
   },
 

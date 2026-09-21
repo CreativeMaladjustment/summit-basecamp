@@ -1,5 +1,6 @@
 -- Tracking columns for the automated roster/fixture/headshot sync job
--- (src/sync.py, run from the weekly cron in src/entry.py).
+-- (src/sync.py, triggered via POST /api/admin/sync -- see src/entry.py and
+-- .github/workflows/sync-roster.yml).
 --
 -- source_ref is the external identifier the sync job matched a row against
 -- (an NWSL roster/schedule slug) so re-runs update the same row instead of

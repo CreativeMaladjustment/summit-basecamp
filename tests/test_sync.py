@@ -42,18 +42,42 @@ SCHEDULE_HTML = """
 </body></html>
 """
 
-ROSTER_HTML = """
-<html><body>
-<script type="application/ld+json">
-{"@type": "ItemList", "itemListElement": [
-  {"item": {"@type": "Person", "name": "Ada Okafor", "jobTitle": "9", "roleName": "FWD",
-            "url": "https://www.nwslsoccer.com/players/ada-okafor"}},
-  {"item": {"@type": "Person", "name": "New Signing", "jobTitle": "14", "roleName": "MID",
-            "url": "https://www.nwslsoccer.com/players/new-signing"}}
-]}
-</script>
-</body></html>
-"""
+def _roster_row(player_id, first, last, slug, jersey, position_label):
+    """One <tr> of the real roster table (nwslsoccer.com renders no JSON-LD
+    on this page -- see sync_sources.fetch_nwsl_roster), trimmed to the bits
+    the parser reads: the data-player-id marker, the name spans, the profile
+    link, and the jersey/position cells."""
+    jersey_text = "" if jersey is None else str(jersey)
+    return """
+    <tr class="StyledTr--1ibdud4 gpEqPQ d3w-table__row d3w-tr">
+      <td class="StyledTd--qyr8y8 gJBcUR d3w-table__cell d3w-td headShots -sticky-column" role="cell">
+        <div class="d3w-player-image-wrap" data-player-id="nwsl::Football_Player::{player_id}">
+          <picture><img alt="{first} {last}"></picture>
+        </div>
+      </td>
+      <td class="StyledTd--qyr8y8 gJBcUR d3w-table__cell d3w-td player -sticky-column" role="cell">
+        <div class="d3w-player-info-wrapper">
+          <a class="StyledPlayerNameLink d3w-player-name d3w-entity-link"
+             href="https://www.nwslsoccer.com/players/{player_id}/{slug}">
+            <span class="d3w-player-name--first">{first}</span><span class="d3w-player-name--last">{last}</span>
+          </a>
+        </div>
+      </td>
+      <td class="StyledTd--qyr8y8 gJBcUR d3w-table__cell d3w-td   jersey " role="cell">{jersey}</td>
+      <td class="StyledTd--qyr8y8 gJBcUR d3w-table__cell d3w-td   position " role="cell">{position}</td>
+    </tr>
+    """.format(
+        player_id=player_id, first=first, last=last, slug=slug,
+        jersey=jersey_text, position=position_label,
+    )
+
+
+ROSTER_HTML = (
+    "<html><body><table><tbody>"
+    + _roster_row("aaaa1111aaaa1111aaaa1111aaaa1111", "Ada", "Okafor", "ada-okafor", 9, "Forward")
+    + _roster_row("bbbb2222bbbb2222bbbb2222bbbb2222", "New", "Signing", "new-signing", 14, "Midfielder")
+    + "</tbody></table></body></html>"
+)
 
 
 def _wiki_pageimages_url(name):
@@ -95,7 +119,10 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
         rows = await sync_query(self.env, "SELECT jersey_number, position, source_ref FROM roster_players WHERE id = 'plr_1'")
         self.assertEqual(rows[0]["jersey_number"], 9)
         self.assertEqual(rows[0]["position"], "FWD")
-        self.assertEqual(rows[0]["source_ref"], "https://www.nwslsoccer.com/players/ada-okafor")
+        self.assertEqual(
+            rows[0]["source_ref"],
+            "https://www.nwslsoccer.com/players/aaaa1111aaaa1111aaaa1111aaaa1111/ada-okafor",
+        )
 
     async def test_roster_sync_preserves_hand_curated_fields(self):
         await self._seed_player()
@@ -227,16 +254,12 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_roster_sync_skips_insert_with_no_position_and_preserves_existing(self):
         await self._seed_player(name="Ada Okafor", position="MID")
-        html = """
-        <html><body><script type="application/ld+json">
-        {"@type": "ItemList", "itemListElement": [
-          {"item": {"@type": "Person", "name": "Ada Okafor", "jobTitle": "9", "roleName": "",
-                    "url": "https://www.nwslsoccer.com/players/ada-okafor"}},
-          {"item": {"@type": "Person", "name": "No Position Yet", "jobTitle": "21", "roleName": "",
-                    "url": "https://www.nwslsoccer.com/players/no-position"}}
-        ]}
-        </script></body></html>
-        """
+        html = (
+            "<html><body><table><tbody>"
+            + _roster_row("aaaa1111aaaa1111aaaa1111aaaa1111", "Ada", "Okafor", "ada-okafor", 9, "")
+            + _roster_row("cccc3333cccc3333cccc3333cccc3333", "No", "Position Yet", "no-position", 21, "")
+            + "</tbody></table></body></html>"
+        )
         js.fetch.install({NWSL_ROSTER_URL: FakeFetchResponse(html)})
 
         result = await sync._sync_roster(self.env)

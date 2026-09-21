@@ -202,7 +202,7 @@ class FakeRequest:
         return json.dumps(self._body)
 
 
-def make_env(schema_path, seed_path=None, environment="development"):
+def make_env(schema_path, seed_path=None, environment="development", sync_admin_token=None):
     """``schema_path`` is one migration file, or a list applied in order --
     mirroring how ``wrangler d1 migrations apply`` runs every file in
     ``migrations/`` in sequence.
@@ -221,4 +221,5 @@ def make_env(schema_path, seed_path=None, environment="development"):
         DB=FakeD1(connection),
         SESSIONS=FakeKV(),
         ENVIRONMENT=environment,
+        SYNC_ADMIN_TOKEN=sync_admin_token,
     )

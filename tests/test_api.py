@@ -31,12 +31,14 @@ SCHEMA = [
 SEED = os.path.join(ROOT, "seed", "dev_seed.sql")
 
 
-def call(env, method, path, user="usr_ada", body=None):
+def call(env, method, path, user="usr_ada", body=None, authorization=None):
     headers = {}
     if user:
         headers["X-Dev-User"] = user
     if body is not None:
         headers["Content-Type"] = "application/json"
+    if authorization is not None:
+        headers["Authorization"] = authorization
     request = FakeRequest(
         method=method,
         url="http://localhost:8787" + path,
@@ -615,6 +617,46 @@ class ScheduledTests(unittest.TestCase):
         import types as _types
 
         asyncio.run(entry.on_scheduled(_types.SimpleNamespace(cron="* * * * *"), self.env, None))
+
+    # --- admin sync -----------------------------------------------------
+
+    def test_trigger_sync_is_unavailable_with_no_token_configured(self):
+        # self.env (SEED-backed, no sync_admin_token) is the default -- a
+        # deployment that never set the secret refuses every call, rather
+        # than falling open.
+        status, payload = call(
+            self.env, "POST", "/api/admin/sync", user=None, authorization="Bearer anything"
+        )
+        self.assertEqual(status, 503)
+        self.assertIn("SYNC_ADMIN_TOKEN", payload["error"])
+
+    def test_trigger_sync_rejects_a_missing_token(self):
+        env = make_env(SCHEMA, SEED, sync_admin_token="s3cret")
+        status, payload = call(env, "POST", "/api/admin/sync", user=None)
+        self.assertEqual(status, 401)
+
+    def test_trigger_sync_rejects_the_wrong_token(self):
+        env = make_env(SCHEMA, SEED, sync_admin_token="s3cret")
+        status, payload = call(
+            env, "POST", "/api/admin/sync", user=None, authorization="Bearer nope"
+        )
+        self.assertEqual(status, 401)
+
+    def test_trigger_sync_does_not_require_a_signed_in_user(self):
+        # The caller is a GitHub Actions job with the shared secret, not a
+        # syndicate member -- no X-Dev-User/session is sent at all here.
+        env = make_env(SCHEMA, SEED, sync_admin_token="s3cret")
+        status, payload = call(
+            env, "POST", "/api/admin/sync", user=None, authorization="Bearer s3cret"
+        )
+        self.assertEqual(status, 200)
+        self.assertIn("summary", payload)
+        # No fetch responses are stubbed in this test module, so every
+        # source job fails fast with SyncSourceError/FetchNotStubbed rather
+        # than hanging or making a real network call -- run_sync itself is
+        # exercised end-to-end against real page markup in test_sync.py.
+        for job_name in ("roster", "fixtures", "opponents"):
+            self.assertIn("error", payload["summary"][job_name])
 
 
 if __name__ == "__main__":
