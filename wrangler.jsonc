@@ -16,7 +16,7 @@
     {
       "binding": "DB",
       "database_name": "summit-hearth-db",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "database_id": "36756ced-9cfe-4c82-86b0-8585dc774c91",
       "migrations_dir": "migrations"
     }
   ],
@@ -28,7 +28,7 @@
   "kv_namespaces": [
     {
       "binding": "SESSIONS",
-      "id": "REPLACE_WITH_KV_NAMESPACE_ID"
+      "id": "ebf7b5e64fd544408b75d882492b2552"
     }
   ],
 
