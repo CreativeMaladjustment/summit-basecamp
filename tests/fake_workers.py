@@ -63,12 +63,63 @@ class FakeURL:
         return cls(url)
 
 
+class FakeFetchResponse:
+    def __init__(self, body, status=200):
+        self.body = body
+        self.status = status
+        self.ok = 200 <= status < 300
+
+    async def text(self):
+        return self.body
+
+    async def json(self):
+        return json.loads(self.body)
+
+
+class FetchNotStubbed(Exception):
+    """Raised when test code calls fetch() without registering a response."""
+
+
+class FakeFetch:
+    """Stand-in for the Worker runtime's global `fetch`.
+
+    Tests register responses by exact URL (`install_fetch_responses`)
+    before exercising code that calls `sync_sources`, so an un-stubbed URL
+    fails loudly instead of making a real network call.
+    """
+
+    def __init__(self):
+        self._responses = {}
+
+    def install(self, responses_by_url):
+        self._responses.update(responses_by_url)
+
+    async def __call__(self, url, options=None):
+        if url not in self._responses:
+            raise FetchNotStubbed(url)
+        response = self._responses[url]
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+
+# A single instance reused across every install_runtime_stubs() call. Worker
+# modules that do `from js import fetch` at import time (sync_sources.py)
+# bind that name once, the first time they're imported anywhere in the test
+# process -- if each test file's install_runtime_stubs() call installed a
+# fresh FakeFetch, only the file that happened to trigger that first import
+# would ever see responses another file's tests register.
+_SHARED_FETCH = FakeFetch()
+
+
 def install_runtime_stubs():
     """Register fake `js` and `pyodide` modules, before importing Worker code."""
     js = types.ModuleType("js")
     js.Response = FakeResponse
     js.URL = FakeURL
     js.Object = types.SimpleNamespace(fromEntries=lambda pairs: pairs)
+    js.fetch = _SHARED_FETCH
+    js.encodeURIComponent = lambda value: __import__("urllib.parse", fromlist=["quote"]).quote(value, safe="")
     sys.modules["js"] = js
 
     pyodide = types.ModuleType("pyodide")
