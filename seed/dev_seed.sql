@@ -53,7 +53,7 @@ INSERT INTO user_notification_prefs (user_id) VALUES
 
 -- Home-team squad and opponent dossiers, backing the Home Team and Visitors
 -- screens (migrations/0002_roster.sql). Transcribed one-for-one from the
--- data that used to be baked into the frontend build
+-- data still baked into the current frontend build
 -- (web/build_src/data.py: SQUAD, OPPONENTS).
 
 INSERT INTO roster_players (id, team, jersey_number, name, position, stats_json, scouting_note, sort_order) VALUES

@@ -549,7 +549,8 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(portland["club"], "Portland Thorns")
         self.assertEqual(portland["quick_stats"], [["Goals for", "31"], ["Goals against", "19"], ["Away wins", "5"]])
         self.assertEqual([p["name"] for p in portland["players"]], ["Marisol Vega", "Elin Sandberg", "Dara Whitfield"])
-        self.assertTrue(portland["players"][0]["is_danger"])
+        self.assertIs(portland["players"][0]["is_danger"], True)
+        self.assertIs(portland["players"][1]["is_danger"], False)
 
 
 class ScheduledTests(unittest.TestCase):

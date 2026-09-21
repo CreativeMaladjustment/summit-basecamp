@@ -1,6 +1,6 @@
 -- Home-team squad and opponent dossiers, backing the Home Team and Visitors
--- screens. Both were rendering from data baked into the frontend build
--- (web/build_src/data.py: SQUAD, OPPONENTS) with no API behind them at all.
+-- screens. Both currently render from data baked into the frontend build
+-- (web/build_src/data.py: SQUAD, OPPONENTS), which had no API behind it at all.
 --
 -- These are club-wide reference data, not scoped to a syndicate (`group`),
 -- so there is no group_id here -- every syndicate sees the same roster.
@@ -40,7 +40,7 @@ CREATE INDEX idx_opponents_sort ON opponents(sort_order);
 
 CREATE TABLE opponent_players (
     id TEXT PRIMARY KEY,
-    opponent_id TEXT REFERENCES opponents(id),
+    opponent_id TEXT NOT NULL REFERENCES opponents(id),
     jersey_number INTEGER NOT NULL,
     name TEXT NOT NULL,
     position TEXT NOT NULL,

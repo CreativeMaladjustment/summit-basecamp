@@ -536,7 +536,11 @@ async def list_opponents(request, env, params):
 
     for opponent in opponents:
         opponent["quick_stats"] = json.loads(opponent.pop("quick_stats_json"))
-        opponent["players"] = by_opponent.get(opponent["id"], [])
+        players_for_opponent = by_opponent.get(opponent["id"], [])
+        for player in players_for_opponent:
+            # SQLite/D1 hands BOOLEAN columns back as 0/1, not JSON booleans.
+            player["is_danger"] = bool(player["is_danger"])
+        opponent["players"] = players_for_opponent
     return json_response({"opponents": opponents})
 
 
