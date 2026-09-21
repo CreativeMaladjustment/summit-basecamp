@@ -113,16 +113,31 @@ it reconciles already lives behind this Worker's D1 binding and the two
 existing daily crons already run the same way -- a second deployment path
 (a workflow with its own D1 credentials) would buy nothing here.
 
-`src/sync.py` runs three independent jobs weekly: roster and fixture facts
+`src/sync.py` runs four independent jobs weekly: roster and fixture facts
 from nwslsoccer.com's Denver Summit team pages (JSON-LD embedded in the
 page; see `src/sync_sources.py` for why and what happens if that markup
 changes), and player headshots from Wikipedia's API, filtered to
 CC0/CC-BY/public-domain licenses only. Existing rows are matched by
 `source_ref` (falling back to a name match the first time) and only the
 fields that drifted are written, so hand-curated content -- scouting notes,
-stats, dossier prose -- is never overwritten. Fixtures and opponent dossiers
-are only ever updated, never created, by this job: creating a fixture also
-creates its seat allocations, which stays an admin decision.
+stats, dossier prose -- is never overwritten; a field the source came back
+without (a blank position, an empty venue) never blanks out an existing
+value. Fixtures and opponent dossiers are only ever updated, never created,
+by this job: creating a fixture also creates its seat allocations, which
+stays an admin decision. A fixture is scoped to one syndicate (`group_id`),
+so more than one syndicate's fixture row can match the same real-world
+match -- the sync updates every matching row, not just one. A fixture not
+yet matched by `source_ref` is matched by opponent within a 21-day window of
+its kickoff date, wide enough to catch a real reschedule without confusing a
+team's home and away fixtures against the same opponent later in the
+season.
+
+Roster players not seen in a run are marked `active = FALSE` rather than
+deleted, so their stats and national-team history survive a departure;
+`GET /api/roster` only returns active players. Opponents have no
+`source_ref` -- nwslsoccer.com's schedule data carries no stable per-club
+identifier, only the name, so matching stays name-based and a club rename
+upstream needs a manual re-match.
 
 There is no object storage (see above), so a sync-sourced headshot is stored
 as the full Wikimedia Commons URL rather than a path under

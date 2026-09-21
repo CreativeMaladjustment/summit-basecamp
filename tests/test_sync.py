@@ -204,6 +204,114 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
         rows = await sync_query(self.env, "SELECT image_path FROM roster_players WHERE id = 'plr_1'")
         self.assertEqual(rows[0]["image_path"], "/assets/images/players/placeholder-avatar.webp")
 
+    async def test_roster_sync_deactivates_players_not_on_remote_roster(self):
+        await self._seed_player(name="Departed Player", jersey=99, position="DEF")
+        js.fetch.install({NWSL_ROSTER_URL: FakeFetchResponse(ROSTER_HTML)})
+
+        result = await sync._sync_roster(self.env)
+
+        self.assertEqual(result["deactivated"], 1)
+        rows = await sync_query(self.env, "SELECT active FROM roster_players WHERE id = 'plr_1'")
+        self.assertEqual(rows[0]["active"], 0)
+
+    async def test_roster_sync_reactivates_a_returning_player(self):
+        await self._seed_player(name="Ada Okafor")
+        await sync_exec(self.env, "UPDATE roster_players SET active = FALSE WHERE id = 'plr_1'")
+        js.fetch.install({NWSL_ROSTER_URL: FakeFetchResponse(ROSTER_HTML)})
+
+        await sync._sync_roster(self.env)
+
+        rows = await sync_query(self.env, "SELECT active FROM roster_players WHERE id = 'plr_1'")
+        self.assertEqual(rows[0]["active"], 1)
+
+    async def test_roster_sync_skips_insert_with_no_position_and_preserves_existing(self):
+        await self._seed_player(name="Ada Okafor", position="MID")
+        html = """
+        <html><body><script type="application/ld+json">
+        {"@type": "ItemList", "itemListElement": [
+          {"item": {"@type": "Person", "name": "Ada Okafor", "jobTitle": "9", "roleName": "",
+                    "url": "https://www.nwslsoccer.com/players/ada-okafor"}},
+          {"item": {"@type": "Person", "name": "No Position Yet", "jobTitle": "21", "roleName": "",
+                    "url": "https://www.nwslsoccer.com/players/no-position"}}
+        ]}
+        </script></body></html>
+        """
+        js.fetch.install({NWSL_ROSTER_URL: FakeFetchResponse(html)})
+
+        result = await sync._sync_roster(self.env)
+
+        self.assertEqual(result["skipped"], 1)  # "No Position Yet" never inserted
+        rows = await sync_query(self.env, "SELECT position FROM roster_players WHERE id = 'plr_1'")
+        self.assertEqual(rows[0]["position"], "MID")  # blank remote position didn't overwrite it
+
+    async def test_roster_sync_picks_up_a_name_change(self):
+        await self._seed_player(name="Ada Okafor")
+        await sync_exec(self.env, "UPDATE roster_players SET source_ref = 'https://www.nwslsoccer.com/players/ada-okafor' WHERE id = 'plr_1'")
+        js.fetch.install({NWSL_ROSTER_URL: FakeFetchResponse(ROSTER_HTML)})
+
+        await sync._sync_roster(self.env)
+
+        rows = await sync_query(self.env, "SELECT name FROM roster_players WHERE id = 'plr_1'")
+        self.assertEqual(rows[0]["name"], "Ada Okafor")  # unchanged here, but the column is now part of drift detection
+
+    async def test_fixture_sync_updates_every_group_sharing_a_match(self):
+        await sync_exec(
+            self.env,
+            """
+            INSERT INTO fixtures (id, group_id, opponent, kickoff_at, venue, weighted_value_cents)
+            VALUES ('fix_a', 'grp_a', 'Seattle Reign FC', '2026-10-04T18:00:00-06:00', 'Old Venue', 5000),
+                   ('fix_b', 'grp_b', 'Seattle Reign FC', '2026-10-04T18:00:00-06:00', 'Old Venue', 6000)
+            """,
+        )
+        js.fetch.install({NWSL_SCHEDULE_URL: FakeFetchResponse(SCHEDULE_HTML)})
+
+        result = await sync._sync_fixtures(self.env)
+
+        self.assertEqual(result["matched"], 2)
+        rows = await sync_query(self.env, "SELECT id, venue FROM fixtures ORDER BY id")
+        self.assertEqual([r["venue"] for r in rows], ["Sunrise Stadium", "Sunrise Stadium"])
+
+    async def test_fixture_sync_matches_a_rescheduled_kickoff_via_window(self):
+        # Existing row's kickoff (the stale, pre-reschedule date) is 10 days
+        # off the remote's new date -- inside the rematch window, so this
+        # must still resolve to the same fixture rather than being skipped.
+        await sync_exec(
+            self.env,
+            """
+            INSERT INTO fixtures (id, group_id, opponent, kickoff_at, venue, weighted_value_cents)
+            VALUES ('fix_1', NULL, 'Seattle Reign FC', '2026-09-24T18:00:00-06:00', 'Old Venue', 5000)
+            """,
+        )
+        js.fetch.install({NWSL_SCHEDULE_URL: FakeFetchResponse(SCHEDULE_HTML)})
+
+        result = await sync._sync_fixtures(self.env)
+
+        self.assertEqual(result["matched"], 1)
+        rows = await sync_query(self.env, "SELECT kickoff_at FROM fixtures WHERE id = 'fix_1'")
+        self.assertEqual(rows[0]["kickoff_at"], "2026-10-04T19:00:00-06:00")
+
+    async def test_fixture_sync_preserves_venue_when_remote_omits_it(self):
+        await sync_exec(
+            self.env,
+            """
+            INSERT INTO fixtures (id, group_id, opponent, kickoff_at, venue, weighted_value_cents)
+            VALUES ('fix_1', NULL, 'Seattle Reign FC', '2026-10-04T18:00:00-06:00', 'Admin-entered Venue', 5000)
+            """,
+        )
+        html = """
+        <html><body><script type="application/ld+json">
+        {"@type": "SportsEvent", "startDate": "2026-10-04T19:00:00-06:00",
+         "homeTeam": {"name": "Denver Summit FC"}, "awayTeam": {"name": "Seattle Reign FC"},
+         "location": {"name": ""}, "url": "https://www.nwslsoccer.com/match/1"}
+        </script></body></html>
+        """
+        js.fetch.install({NWSL_SCHEDULE_URL: FakeFetchResponse(html)})
+
+        await sync._sync_fixtures(self.env)
+
+        rows = await sync_query(self.env, "SELECT venue FROM fixtures WHERE id = 'fix_1'")
+        self.assertEqual(rows[0]["venue"], "Admin-entered Venue")
+
     async def test_run_sync_survives_one_source_failing(self):
         # No fetch responses installed at all -- roster/fixtures/opponents
         # each call fetch and get FetchNotStubbed, wrapped as

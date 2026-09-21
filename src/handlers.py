@@ -498,7 +498,7 @@ async def list_roster(request, env, params):
     await current_user(request, env)
     players = await query(
         env,
-        "SELECT * FROM roster_players ORDER BY sort_order, jersey_number",
+        "SELECT * FROM roster_players WHERE active ORDER BY sort_order, jersey_number",
     )
     caps = await query(
         env,
