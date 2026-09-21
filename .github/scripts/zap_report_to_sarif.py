@@ -67,14 +67,27 @@ def build_result(rule: dict, risk_code: str, site_uri: str, alert: dict, instanc
     if alert.get("otherinfo"):
         message_parts.append(str(alert["otherinfo"]))
 
+    location_uri = instance.get("uri") or site_uri
+
+    # GitHub's code-scanning SARIF ingestion resolves artifactLocation.uri
+    # against the checked-out repository (a file:// tree). What ZAP actually
+    # scanned is always an absolute http(s) URL — an ephemeral local target
+    # or a real deployment, never a path inside the checkout — so setting it
+    # as a location is silently rejected wholesale ("SARIF URI scheme
+    # \"http\" did not match the checkout URI scheme \"file\""), which fails
+    # the whole upload rather than just this one result. Fold it into the
+    # message instead of a location GitHub can't resolve.
+    is_unresolvable_url = bool(location_uri) and location_uri.startswith(("http://", "https://"))
+    if is_unresolvable_url:
+        message_parts.append(f"URL: {location_uri}")
+
     result = {
         "ruleId": rule["id"],
         "level": LEVEL_MAP.get(risk_code, "warning"),
         "message": {"text": "\n".join(message_parts)},
     }
 
-    location_uri = instance.get("uri") or site_uri
-    if location_uri:
+    if location_uri and not is_unresolvable_url:
         result["locations"] = [
             {
                 "physicalLocation": {
