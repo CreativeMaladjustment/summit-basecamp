@@ -4,7 +4,7 @@ _As of 2026-09-21_
 
 ## Purpose
 
-SquadSeats (internally "Summit Hearth & Bench") is a mobile-first PWA for a season-ticket syndicate: a small group of fans (a "circle") who co-own a season package for one club (modeled on Denver Summit FC) and need to coordinate who sits in which seat at which fixture, hand off seats they can't use, and split the shared costs fairly.
+SquadSeats (internally "Summit Hearth & Bench") is a mobile-first progressive web app (PWA) for a season-ticket syndicate: a small group of fans (a "circle") who co-own a season package for one club (modeled on Denver Summit FC) and need to coordinate who sits in which seat at which fixture, hand off seats they can't use, and split the shared costs fairly.
 
 The product solves three problems syndicates otherwise track by spreadsheet and group chat:
 
