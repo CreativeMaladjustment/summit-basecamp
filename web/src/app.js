@@ -130,8 +130,12 @@ function refreshBenchCount() {
     const visibleCards = waiting.querySelectorAll('[data-bench-card]:not([hidden])');
     waiting.hidden = visibleCards.length === 0;
   }
-  const empty = document.getElementById('bench-empty');
   const listed = document.getElementById('bench-listed');
+  if (listed) {
+    const visibleListed = listed.querySelectorAll('[data-bench-card]:not([hidden])');
+    listed.hidden = visibleListed.length === 0;
+  }
+  const empty = document.getElementById('bench-empty');
   if (empty) {
     const anyVisible = document.querySelectorAll('#bench-waiting [data-bench-card]:not([hidden]), #bench-listed [data-bench-card]:not([hidden])').length;
     empty.hidden = anyVisible > 0;

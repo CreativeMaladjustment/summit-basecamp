@@ -5,7 +5,7 @@ one bit of cross-view plumbing every screen that shows a seat shares."""
 from __future__ import annotations
 
 from markup import h
-from components import avatar, badge
+from components import avatar
 from data import MEMBERS, ME
 
 

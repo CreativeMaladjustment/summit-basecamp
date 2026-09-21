@@ -11,7 +11,7 @@ from markup import h, Raw
 from icons import svg
 from components import badge
 from fmt import money, match_date, match_time
-from data import MEMBERS, ME, FIXTURES
+from data import MEMBERS
 from seats import seat_key, claim_button
 
 

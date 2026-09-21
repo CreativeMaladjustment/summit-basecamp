@@ -6,8 +6,7 @@ reply text — are left to the small runtime in src/app.js.
 """
 from __future__ import annotations
 
-from markup import h, Raw
-from icons import svg
+from markup import h
 from data import MEMBERS
 
 

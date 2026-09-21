@@ -8,7 +8,7 @@ from markup import h, Raw
 from icons import svg
 from components import avatar, badge
 from fmt import money, match_date, match_time, relative
-from data import MEMBERS, TIERS, ME, HEARTHSIDE_NOTES, QUICK_REPLIES
+from data import MEMBERS, ME, HEARTHSIDE_NOTES, QUICK_REPLIES
 from seats import seat_pair, claim_button
 
 
