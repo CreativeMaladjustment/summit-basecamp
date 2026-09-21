@@ -42,7 +42,7 @@ def player_card(p):
           photo_slot(p["id"], 92),
           h("div", {"style": {"minWidth": "0", "flex": "1"}},
             h("p", {"style": {"margin": "0", "display": "flex", "alignItems": "center", "gap": "8px", "flexWrap": "wrap"}},
-              badge(f'#{p["num"]}', "gold"),
+              badge(f'#{p["num"]}' if p["num"] else "No. TBD", "gold"),
               h("a", {"href": f'https://en.wikipedia.org/w/index.php?search={_urlenc(p["name"])}',
                        "target": "_blank", "rel": "noopener noreferrer",
                        "style": {"fontFamily": "var(--font-display)", "fontWeight": "700", "fontSize": "16px"}}, p["name"])),
