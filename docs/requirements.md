@@ -69,7 +69,6 @@ An expense (`POST /api/groups/{id}/expenses`) writes one `transactions` row per 
 ### Known gaps between design and build
 
 - No push notification delivery (only the underlying "who needs a nudge" logic).
-- No weighted expense splitting by fixture tier, and no credit for releasing a seat to the bench.
 - No roster/player-stats API backing Home Team and Visitors.
 - No integration with any external ticketing platform (SeatGeek, Ticketmaster, the club's own app) — "List Outside the Hearth" only tracks that a seat is listed; the admin or seat holder handles the actual transfer or sale themselves, outside SquadSeats.
 - Frontend and backend are not yet integrated — the PWA ships with mock data compiled in at build time (`web/build_src/data.py`); wiring it to the live API (build-time fetch for public data, runtime session-authenticated fetch for per-member data like balances and seat assignments) is the next major milestone.
