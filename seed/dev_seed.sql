@@ -83,3 +83,10 @@ INSERT INTO opponent_players (id, opponent_id, jersey_number, name, position, is
     ('o7', 'op_acf', 7, 'Céline Abara', 'FWD', 1, 'Best player on either team most weeks. Double her the moment she faces up.', 0),
     ('o8', 'op_acf', 3, 'Wren Okonkwo', 'DEF', 0, 'Left of the three. Comfortable stepping in, uncomfortable turning.', 1),
     ('o9', 'op_acf', 16, 'Tamsin Reyes', 'MID', 0, 'Runs the whole game at one speed. Tires after 70.', 2);
+
+-- National-team history for a few players (migrations/0003_national_team.sql).
+-- Fictional, like the rest of SQUAD -- a stand-in until the real roster lands.
+INSERT INTO national_team_appearances (id, player_id, country, year_start, year_end, sort_order) VALUES
+    ('nt_001', 'p7', 'USWNT', 2024, NULL, 0),         -- Tess Aldridge, still capped
+    ('nt_002', 'p6', 'Canada', 2019, 2022, 0),         -- Sloane Beckett, past caps
+    ('nt_003', 'p5', 'Nigeria', 2021, NULL, 0);        -- Nadia Okafor, still capped

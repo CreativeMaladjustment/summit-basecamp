@@ -500,8 +500,23 @@ async def list_roster(request, env, params):
         env,
         "SELECT * FROM roster_players ORDER BY sort_order, jersey_number",
     )
+    caps = await query(
+        env,
+        """
+        SELECT * FROM national_team_appearances
+        ORDER BY player_id, year_start
+        """,
+    )
+    caps_by_player = {}
+    for cap in caps:
+        caps_by_player.setdefault(cap["player_id"], []).append(cap)
+
     for player in players:
         player["stats"] = json.loads(player.pop("stats_json"))
+        history = caps_by_player.get(player["id"], [])
+        player["national_team_history"] = history
+        current = next((cap for cap in history if cap["year_end"] is None), None)
+        player["current_national_team"] = current["country"] if current else None
     return json_response({"players": players})
 
 

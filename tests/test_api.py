@@ -24,6 +24,7 @@ import entry  # noqa: E402
 SCHEMA = [
     os.path.join(ROOT, "migrations", "0001_initial.sql"),
     os.path.join(ROOT, "migrations", "0002_roster.sql"),
+    os.path.join(ROOT, "migrations", "0003_national_team.sql"),
 ]
 SEED = os.path.join(ROOT, "seed", "dev_seed.sql")
 
@@ -517,6 +518,27 @@ class ApiTests(unittest.TestCase):
     def test_roster_requires_sign_in(self):
         status, payload = call(self.env, "GET", "/api/roster", user=None)
         self.assertEqual(status, 401)
+
+    def test_roster_carries_national_team_history(self):
+        status, payload = call(self.env, "GET", "/api/roster")
+        self.assertEqual(status, 200)
+        players = {p["id"]: p for p in payload["players"]}
+
+        # Tess Aldridge: still capped for the USWNT.
+        tess = players["p7"]
+        self.assertEqual(tess["current_national_team"], "USWNT")
+        self.assertEqual(len(tess["national_team_history"]), 1)
+        self.assertIsNone(tess["national_team_history"][0]["year_end"])
+
+        # Sloane Beckett: past Canada caps, not currently on a national team.
+        sloane = players["p6"]
+        self.assertIsNone(sloane["current_national_team"])
+        self.assertEqual(sloane["national_team_history"][0]["year_end"], 2022)
+
+        # Rowan Vasquez: never capped.
+        rowan = players["p1"]
+        self.assertIsNone(rowan["current_national_team"])
+        self.assertEqual(rowan["national_team_history"], [])
 
     def test_opponents_nest_their_players(self):
         status, payload = call(self.env, "GET", "/api/opponents")
