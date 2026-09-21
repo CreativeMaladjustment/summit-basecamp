@@ -63,8 +63,17 @@ class ZapReportToSarifTests(unittest.TestCase):
         self.assertEqual(results[1]["ruleId"], "10001:Second name")
         self.assertEqual(results[0]["message"]["text"], "First name\nParameter: a\nURL: https://one.example/a")
         self.assertEqual(results[1]["message"]["text"], "Second name\nEvidence: match\nURL: https://two.example/b")
-        self.assertNotIn("locations", results[0])
-        self.assertNotIn("locations", results[1])
+        # http(s) URIs can't be resolved as a checkout-relative SARIF location,
+        # but GitHub also rejects a result with zero locations — so an
+        # unresolvable one falls back to the workflow file instead.
+        self.assertEqual(
+            results[0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+            MODULE.FALLBACK_ARTIFACT_URI,
+        )
+        self.assertEqual(
+            results[1]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+            MODULE.FALLBACK_ARTIFACT_URI,
+        )
 
     def test_build_rule_extracts_help_uri(self):
         rule = MODULE.build_rule(
@@ -88,10 +97,10 @@ class ZapReportToSarifTests(unittest.TestCase):
             {"otherinfo": "Details"},
             {},
         )
-        # http(s) URIs can't be resolved as a checkout-relative SARIF location
-        # (GitHub rejects the whole upload if they are), so they're folded
-        # into the message text instead and no `locations` entry is emitted.
-        self.assertNotIn("locations", result)
+        self.assertEqual(
+            result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+            MODULE.FALLBACK_ARTIFACT_URI,
+        )
         self.assertEqual(result["message"]["text"], "No instances\nDetails\nURL: https://site.example")
 
     def test_non_http_uri_still_emits_a_location(self):
@@ -134,7 +143,10 @@ class ZapReportToSarifTests(unittest.TestCase):
 
         result = sarif["runs"][0]["results"][0]
         self.assertEqual(result["ruleId"], "40004:Single site")
-        self.assertNotIn("locations", result)
+        self.assertEqual(
+            result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+            MODULE.FALLBACK_ARTIFACT_URI,
+        )
         self.assertEqual(result["message"]["text"], "Single site\nParameter: p\nURL: https://solo.example/path")
 
     def test_nested_alertitem_objects_are_expanded(self):

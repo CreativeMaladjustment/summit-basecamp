@@ -6,6 +6,17 @@ import sys
 LEVEL_MAP = {"0": "note", "1": "warning", "2": "error", "3": "error"}
 SEVERITY_MAP = {"0": "0.0", "1": "3.3", "2": "6.7", "3": "9.8"}
 
+# GitHub's code-scanning SARIF ingestion requires every result to carry at
+# least one location, but also resolves artifactLocation.uri against the
+# checked-out repository (a file:// tree) — and what ZAP actually scanned is
+# always an absolute http(s) URL (an ephemeral local target or a real
+# deployment), never a path inside the checkout. Neither omitting the
+# location nor pointing it at that URL is accepted, so unresolvable results
+# fall back to the workflow that runs the scan: always present in the
+# checkout, and a reasonable "where this came from" pointer. The real URL
+# still goes in the result's message text.
+FALLBACK_ARTIFACT_URI = ".github/workflows/dast.yml"
+
 
 def ensure_list(value):
     if isinstance(value, list):
@@ -68,15 +79,6 @@ def build_result(rule: dict, risk_code: str, site_uri: str, alert: dict, instanc
         message_parts.append(str(alert["otherinfo"]))
 
     location_uri = instance.get("uri") or site_uri
-
-    # GitHub's code-scanning SARIF ingestion resolves artifactLocation.uri
-    # against the checked-out repository (a file:// tree). What ZAP actually
-    # scanned is always an absolute http(s) URL — an ephemeral local target
-    # or a real deployment, never a path inside the checkout — so setting it
-    # as a location is silently rejected wholesale ("SARIF URI scheme
-    # \"http\" did not match the checkout URI scheme \"file\""), which fails
-    # the whole upload rather than just this one result. Fold it into the
-    # message instead of a location GitHub can't resolve.
     is_unresolvable_url = bool(location_uri) and location_uri.startswith(("http://", "https://"))
     if is_unresolvable_url:
         message_parts.append(f"URL: {location_uri}")
@@ -85,16 +87,16 @@ def build_result(rule: dict, risk_code: str, site_uri: str, alert: dict, instanc
         "ruleId": rule["id"],
         "level": LEVEL_MAP.get(risk_code, "warning"),
         "message": {"text": "\n".join(message_parts)},
-    }
-
-    if location_uri and not is_unresolvable_url:
-        result["locations"] = [
+        "locations": [
             {
                 "physicalLocation": {
-                    "artifactLocation": {"uri": location_uri}
+                    "artifactLocation": {
+                        "uri": location_uri if (location_uri and not is_unresolvable_url) else FALLBACK_ARTIFACT_URI
+                    }
                 }
             }
-        ]
+        ],
+    }
 
     return result
 
