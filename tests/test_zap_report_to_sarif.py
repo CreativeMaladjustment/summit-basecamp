@@ -61,8 +61,10 @@ class ZapReportToSarifTests(unittest.TestCase):
         self.assertEqual({rule["id"] for rule in rules}, {"10001:First name", "10001:Second name"})
         self.assertEqual(results[0]["ruleId"], "10001:First name")
         self.assertEqual(results[1]["ruleId"], "10001:Second name")
-        self.assertEqual(results[0]["message"]["text"], "First name\nParameter: a")
-        self.assertEqual(results[1]["message"]["text"], "Second name\nEvidence: match")
+        self.assertEqual(results[0]["message"]["text"], "First name\nParameter: a\nURL: https://one.example/a")
+        self.assertEqual(results[1]["message"]["text"], "Second name\nEvidence: match\nURL: https://two.example/b")
+        self.assertNotIn("locations", results[0])
+        self.assertNotIn("locations", results[1])
 
     def test_build_rule_extracts_help_uri(self):
         rule = MODULE.build_rule(
@@ -86,8 +88,25 @@ class ZapReportToSarifTests(unittest.TestCase):
             {"otherinfo": "Details"},
             {},
         )
-        self.assertEqual(result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"], "https://site.example")
-        self.assertEqual(result["message"]["text"], "No instances\nDetails")
+        # http(s) URIs can't be resolved as a checkout-relative SARIF location
+        # (GitHub rejects the whole upload if they are), so they're folded
+        # into the message text instead and no `locations` entry is emitted.
+        self.assertNotIn("locations", result)
+        self.assertEqual(result["message"]["text"], "No instances\nDetails\nURL: https://site.example")
+
+    def test_non_http_uri_still_emits_a_location(self):
+        result = MODULE.build_result(
+            {"id": "35003", "name": "Resolvable location"},
+            "1",
+            "file:///workspace/site.example",
+            {},
+            {},
+        )
+        self.assertEqual(
+            result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+            "file:///workspace/site.example",
+        )
+        self.assertEqual(result["message"]["text"], "Resolvable location")
 
     def test_single_site_and_instance_objects_are_normalized(self):
         report = {
@@ -115,10 +134,8 @@ class ZapReportToSarifTests(unittest.TestCase):
 
         result = sarif["runs"][0]["results"][0]
         self.assertEqual(result["ruleId"], "40004:Single site")
-        self.assertEqual(
-            result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
-            "https://solo.example/path",
-        )
+        self.assertNotIn("locations", result)
+        self.assertEqual(result["message"]["text"], "Single site\nParameter: p\nURL: https://solo.example/path")
 
     def test_nested_alertitem_objects_are_expanded(self):
         report = {
@@ -146,7 +163,7 @@ class ZapReportToSarifTests(unittest.TestCase):
 
         result = sarif["runs"][0]["results"][0]
         self.assertEqual(result["ruleId"], "50005:Nested alert")
-        self.assertEqual(result["message"]["text"], "Nested alert")
+        self.assertEqual(result["message"]["text"], "Nested alert\nURL: https://nested.example/path")
 
     def test_nested_instance_objects_are_expanded(self):
         report = {
@@ -179,7 +196,9 @@ class ZapReportToSarifTests(unittest.TestCase):
 
         result = sarif["runs"][0]["results"][0]
         self.assertEqual(result["ruleId"], "60006:Nested instance")
-        self.assertEqual(result["message"]["text"], "Nested instance\nEvidence: token")
+        self.assertEqual(
+            result["message"]["text"], "Nested instance\nEvidence: token\nURL: https://instance.example/path"
+        )
 
 
 if __name__ == "__main__":
