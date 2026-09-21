@@ -57,12 +57,24 @@ jobs:
             exit 0
           fi
 
-          output="$(npx --no-install wrangler kv namespace create SESSIONS)"
-          echo "$output"
+          # A namespace named SESSIONS may already exist from a prior run of
+          # this workflow whose PR hasn't merged yet. Reuse it instead of
+          # creating (and billing for) a duplicate.
+          id="$(npx --no-install wrangler kv namespace list \
+            | jq -r '.[] | select(.title == "SESSIONS") | .id' | head -n1 || true)"
 
-          id="$(printf '%s' "$output" | grep -oE '"?id"? *[:=] *"[0-9a-f]{32}"' | grep -oE '[0-9a-f]{32}' | head -n1)"
           if [ -z "$id" ]; then
-            echo "::error::Could not find the new namespace id in Wrangler's output above. Update wrangler.jsonc by hand with the id shown there."
+            output="$(npx --no-install wrangler kv namespace create SESSIONS)"
+            echo "$output"
+            id="$(printf '%s' "$output" \
+              | grep -oE '"?id"? *[:=] *"[0-9a-f]{32}"' \
+              | grep -oE '[0-9a-f]{32}' | head -n1 || true)"
+          else
+            echo "Reusing existing SESSIONS namespace ($id)."
+          fi
+
+          if [ -z "$id" ]; then
+            echo "::error::Could not find the namespace id in Wrangler's output above. Update wrangler.jsonc by hand with the id shown there."
             exit 1
           fi
 
@@ -82,12 +94,27 @@ jobs:
             exit 0
           fi
 
-          output="$(npx --no-install wrangler d1 create summit-hearth-db)"
-          echo "$output"
+          # A database named summit-hearth-db may already exist from a prior
+          # run of this workflow whose PR hasn't merged yet. Reuse it instead
+          # of creating (and billing for) a duplicate.
+          id="$(npx --no-install wrangler d1 list --json \
+            | jq -r '.[] | select(.name == "summit-hearth-db") | .uuid' | head -n1 || true)"
 
-          id="$(printf '%s' "$output" | grep -oE '"database_id" *: *"[0-9a-f-]{36}"' | grep -oE '[0-9a-f-]{36}' | head -n1)"
           if [ -z "$id" ]; then
-            echo "::error::Could not find the new database id in Wrangler's output above. Update wrangler.jsonc by hand with the id shown there."
+            output="$(npx --no-install wrangler d1 create summit-hearth-db)"
+            echo "$output"
+            # Wrangler prints the config snippet to add in TOML form
+            # (database_id = "..."), not JSON, so match the key/value pair
+            # with optional quotes around the key and either separator.
+            id="$(printf '%s' "$output" \
+              | grep -oE '"?database_id"? *[:=] *"[0-9a-f-]{36}"' \
+              | grep -oE '[0-9a-f-]{36}' | head -n1 || true)"
+          else
+            echo "Reusing existing summit-hearth-db database ($id)."
+          fi
+
+          if [ -z "$id" ]; then
+            echo "::error::Could not find the database id in Wrangler's output above. Update wrangler.jsonc by hand with the id shown there."
             exit 1
           fi
 
@@ -103,12 +130,20 @@ jobs:
           branch="provision-cloudflare-resources-${{ github.run_id }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$branch"
+          git checkout -B "$branch"
           git add wrangler.jsonc
           git commit -m "Wire real Cloudflare resource ids into wrangler.jsonc"
-          git push origin "$branch"
-          gh pr create \
-            --title "Wire real Cloudflare resource ids into wrangler.jsonc" \
-            --body "Created by the Provision Cloudflare resources workflow (run ${{ github.run_id }}). Replaces the placeholder KV namespace and/or D1 database id in wrangler.jsonc with the id(s) of the resource(s) just created in the Cloudflare account behind the shb environment." \
-            --base main \
-            --head "$branch"
+          # -B and --force handle a re-run of this same workflow run (same
+          # run_id, so same branch name) picking up after a transient
+          # failure in this step.
+          git push --force origin "$branch"
+
+          if gh pr list --head "$branch" --state open --json number --jq '.[0].number' | grep -q .; then
+            echo "PR for $branch already open, nothing more to do."
+          else
+            gh pr create \
+              --title "Wire real Cloudflare resource ids into wrangler.jsonc" \
+              --body "Created by the Provision Cloudflare resources workflow (run ${{ github.run_id }}). Replaces the placeholder KV namespace and/or D1 database id in wrangler.jsonc with the id(s) of the resource(s) just created in the Cloudflare account behind the shb environment." \
+              --base main \
+              --head "$branch"
+          fi
