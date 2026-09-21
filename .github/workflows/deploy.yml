@@ -40,7 +40,7 @@ jobs:
       d1-database: ${{ steps.detect.outputs.d1-database }}
       has-migrations: ${{ steps.detect.outputs.has-migrations }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - id: detect
         shell: bash
@@ -118,20 +118,21 @@ jobs:
     runs-on: ubuntu-latest
     environment: shb
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
 
       # Migrations run before the Worker that depends on them.
       - name: Apply D1 migrations
         if: needs.detect.outputs.has-migrations == 'true' && needs.detect.outputs.d1-database != ''
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: ${{ needs.detect.outputs.worker-dir }}
+          wranglerVersion: '4.135.0'
           command: d1 migrations apply ${{ needs.detect.outputs.d1-database }} --remote
 
       - name: Warn when migrations cannot be applied
@@ -140,11 +141,12 @@ jobs:
           echo "::warning::Migrations exist but no D1 database name was found in the wrangler config. Set the CF_D1_DATABASE repository variable, or name the database in wrangler.toml. Skipping migrations rather than guessing."
 
       - name: Deploy Worker
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: ${{ needs.detect.outputs.worker-dir }}
+          wranglerVersion: '4.135.0'
           command: deploy
 
   web:
@@ -162,17 +164,18 @@ jobs:
     runs-on: ubuntu-latest
     environment: shb
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
 
       - name: Deploy to Pages
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4.135.0'
           command: >-
             pages deploy ${{ needs.detect.outputs.static-dir }}
             --project-name=${{ vars.CF_PAGES_PROJECT || 'summit-hearth-and-bench' }}
