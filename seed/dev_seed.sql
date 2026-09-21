@@ -60,6 +60,16 @@ INSERT INTO user_notification_prefs (user_id) VALUES
 -- placeholder-avatar default (see web/build_src/data.py for why).
 -- Opponent dossiers below are still fictional -- a stand-in until real
 -- scouting data for those clubs exists.
+--
+-- DELETE first: ids p1-p10 used to belong to the old fictional SQUAD and
+-- now name different real players, so a database that already ran the
+-- previous version of this seed (rather than being recreated from scratch)
+-- would otherwise collide on those primary keys, and any national-team
+-- rows still pointing at the reused ids would misattribute caps to whoever
+-- now holds p5-p7. Clearing both tables first makes reseeding safe either
+-- way.
+DELETE FROM national_team_appearances;
+DELETE FROM roster_players;
 
 INSERT INTO roster_players (id, team, jersey_number, name, position, stats_json, scouting_note, sort_order) VALUES
     ('p1', 'Denver Summit FC', 1, 'Abby Smith', 'GK', '[["Position", "Goalkeeper"], ["Nationality", "USA"]]', 'Denver Summit FC goalkeeper. See the club''s official roster for 2026 season statistics.', 0),
@@ -89,7 +99,7 @@ INSERT INTO roster_players (id, team, jersey_number, name, position, stats_json,
     ('p25', 'Denver Summit FC', 26, 'Natasha Flint', 'FWD', '[["Position", "Forward"], ["Nationality", "ENG"]]', 'Denver Summit FC forward. See the club''s official roster for 2026 season statistics.', 24),
     ('p26', 'Denver Summit FC', 33, 'Olivia Thomas', 'FWD', '[["Position", "Forward"], ["Nationality", "USA"]]', 'Denver Summit FC forward. See the club''s official roster for 2026 season statistics.', 25),
     ('p27', 'Denver Summit FC', 79, 'Nahikari García', 'FWD', '[["Position", "Forward"], ["Nationality", "ESP"]]', 'Denver Summit FC forward. See the club''s official roster for 2026 season statistics.', 26),
-    ('p28', 'Denver Summit FC', 0, 'Faith Webber', 'FWD', '[["Position", "Forward"], ["Nationality", "USA"]]', 'Denver Summit FC forward. See the club''s official roster for 2026 season statistics.', 27);
+    ('p28', 'Denver Summit FC', NULL, 'Faith Webber', 'FWD', '[["Position", "Forward"], ["Nationality", "USA"]]', 'Denver Summit FC forward. See the club''s official roster for 2026 season statistics.', 27);
 
 INSERT INTO opponents (id, club, chip_label, home_date, away_date, away_venue, form, shape_note, halftime_note, quick_stats_json, sort_order) VALUES
     ('op_por', 'Portland Thorns', 'Portland · 9/26', '9/26', '5/9', 'Providence Park', 'W W D L W', '4-3-3, inverted right back, high line they will not drop.', 'They press the goal kick for twenty minutes and then stop. Play through the first twenty and the second half opens up.', '[["Goals for", "31"], ["Goals against", "19"], ["Away wins", "5"]]', 0),
