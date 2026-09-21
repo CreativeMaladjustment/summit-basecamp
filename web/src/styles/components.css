@@ -96,8 +96,11 @@
   white-space: nowrap;
 }
 .badge--gold { background: var(--summit-sunshine); color: #1C1917; font-weight: 700; }
-.badge--ember { background: rgba(200,75,49,.14); color: var(--summit-sandstone); }
-.badge--green { background: rgba(29,105,96,.14); color: var(--summit-green); }
+/* --summit-sandstone/--summit-green are fixed (not light-dark()), so their
+   14% tints read as near-black in dark mode; brighten text and tint for dark
+   to keep badge text at readable contrast against the dark surface. */
+.badge--ember { background: light-dark(rgba(200,75,49,.14), rgba(200,75,49,.22)); color: light-dark(var(--summit-sandstone), #E8967D); }
+.badge--green { background: light-dark(rgba(29,105,96,.14), rgba(29,105,96,.22)); color: light-dark(var(--summit-green), #6FC9BC); }
 .badge--mute { background: var(--surface-sunk); color: var(--ink-mute); }
 
 /* ---------- Avatars ---------- */

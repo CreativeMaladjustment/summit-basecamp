@@ -99,7 +99,7 @@ function setSeatState(key, toState) {
   }
 }
 
-function claimSeat(key) {
+function claimSeat(key, handOffId) {
   setSeatState(key, 'claimed');
   if (!state.claimedSeats.includes(key)) state.claimedSeats.push(key);
   // The card in Bench and the row's claim button in Pitch live inside a
@@ -107,12 +107,32 @@ function claimSeat(key) {
   for (const card of document.querySelectorAll(`[data-bench-card][data-seat="${CSS.escape(key)}"]`)) {
     card.hidden = true;
   }
+  for (const btn of document.querySelectorAll(`[data-claim-seat="${CSS.escape(key)}"]`)) {
+    btn.hidden = true;
+  }
+  // Claiming from the Matchday bench-note thread flips that note's own
+  // controls off and shows who took it, in addition to the generic
+  // [data-seat] toggling above.
+  if (handOffId) {
+    const controls = document.getElementById(`active-controls-${handOffId}`);
+    if (controls) controls.hidden = true;
+    const takenLine = document.getElementById(`taken-line-${handOffId}`);
+    if (takenLine) {
+      takenLine.textContent = 'You took the seat.';
+      takenLine.hidden = false;
+    }
+  }
   refreshBenchCount();
   persist();
 }
 
-function releaseSeat(key) {
+// outcome: 'released' (open to the whole circle), 'gifted' (a named guest)
+// or 'listed' (an external exchange) — only 'released' also reveals the
+// seat's claimable Bench card, keyed separately (see seats.py/bench.py) so
+// gifting or listing a seat never makes it wrongly appear open to claim.
+function releaseSeat(key, outcome) {
   setSeatState(key, 'released');
+  if (outcome === 'released') setSeatState(`${key}:listing`, 'open');
   if (!state.releasedSeats.includes(key)) state.releasedSeats.push(key);
   refreshBenchCount();
   persist();
@@ -264,13 +284,37 @@ function wireToggle(btn) {
   });
 }
 
-function paintDeviceBanner() {
+function iosDeviceState() {
   const ua = navigator.userAgent;
   const isIos = /iPad|iPhone|iPod/.test(ua) || (ua.includes('Macintosh') && 'ontouchend' in document);
   const standalone = window.navigator.standalone === true || window.matchMedia?.('(display-mode: standalone)').matches;
+  return { isIos, standalone };
+}
+
+function paintDeviceBanner() {
+  const { isIos, standalone } = iosDeviceState();
   const which = isIos && !standalone ? 'ios-safari' : (state.prefs.pushEnabled ? 'active' : 'prompt');
   for (const el of document.querySelectorAll('[data-device-banner]')) {
     el.hidden = el.dataset.deviceBanner !== which;
+  }
+}
+
+function hydratePrefs() {
+  // The switches, dependent rows and bio-scope radios are pre-rendered with
+  // their default values; when a returning visitor's persisted prefs differ
+  // from those defaults, reflect the real state before anything is clicked.
+  for (const btn of document.querySelectorAll('.switch[data-pref]')) {
+    btn.setAttribute('aria-checked', String(!!state.prefs[btn.dataset.pref]));
+  }
+  const checkinRow = document.getElementById('checkin-time-row');
+  if (checkinRow) checkinRow.hidden = !state.prefs.checkin3Day;
+  const bioScopeBlock = document.getElementById('bio-scope-block');
+  if (bioScopeBlock) bioScopeBlock.hidden = !state.prefs.dailyBio;
+  for (const btn of document.querySelectorAll('[data-role="bio-scope"]')) {
+    const on = btn.dataset.value === state.prefs.bioScope;
+    btn.setAttribute('aria-checked', String(on));
+    btn.style.borderColor = on ? 'var(--summit-green)' : '';
+    btn.style.background = on ? 'var(--surface-sunk)' : '';
   }
 }
 
@@ -303,6 +347,7 @@ function main() {
   for (const key of state.releasedSeats) setSeatState(key, 'released');
   refreshBenchCount();
   wirePhotoSlots();
+  hydratePrefs();
   paintDeviceBanner();
   paintPreview();
 
@@ -311,16 +356,20 @@ function main() {
   document.getElementById('bio-time')?.addEventListener('change', paintPreview);
 
   document.body.addEventListener('click', (e) => {
-    const el = e.target.closest('[data-role],[data-open-sheet],[data-close-sheet],[data-claim-seat],[data-carousel],[data-carousel-dot],[data-cost-choice],[data-quick-reply]');
-    if (!el) {
-      // Clicking the backdrop itself (not its sheet card) closes it.
-      if (e.target.dataset?.role === 'sheet' || e.target.classList?.contains('sheet-backdrop')) closeSheet();
+    // Clicking the backdrop itself (not its sheet card) closes it. Checked
+    // before the closest() match below, since the backdrop carries
+    // data-role="sheet" itself and would otherwise match that selector.
+    if (e.target.dataset?.role === 'sheet' || e.target.classList?.contains('sheet-backdrop')) {
+      closeSheet();
       return;
     }
 
+    const el = e.target.closest('[data-role],[data-open-sheet],[data-close-sheet],[data-claim-seat],[data-carousel],[data-carousel-dot],[data-cost-choice],[data-quick-reply]');
+    if (!el) return;
+
     if (el.dataset.openSheet) { openSheet(el.dataset.openSheet); return; }
     if (el.dataset.closeSheet !== undefined) { closeSheet(); return; }
-    if (el.dataset.claimSeat) { claimSeat(el.dataset.claimSeat); return; }
+    if (el.dataset.claimSeat) { claimSeat(el.dataset.claimSeat, el.dataset.handOff); return; }
 
     switch (el.dataset.role) {
       case 'sign-in':
@@ -418,9 +467,11 @@ function main() {
               paintDeviceBanner();
             });
         } else {
-          // No Notification API to ask permission of (e.g. an iOS PWA
-          // relying on native push entitlements instead) — nothing to gate on.
-          setPref('pushEnabled', true);
+          // No Notification API to ask permission of. An installed iOS PWA
+          // still gets push via its own entitlements without this API — but
+          // anywhere else there's nothing to enable, so don't claim success.
+          const { isIos, standalone } = iosDeviceState();
+          setPref('pushEnabled', isIos && standalone);
           paintDeviceBanner();
         }
         return;
@@ -442,16 +493,19 @@ function main() {
           costPath: document.querySelector(`#sheet-release-${el.dataset.fixture}-${el.dataset.seat} [data-cost-choice][aria-pressed="true"]`)?.dataset.costChoice ?? 'repay',
           amountCents: Number(el.dataset.faceCents),
         });
-        releaseSeat(`${el.dataset.fixture}-${el.dataset.seat}`);
+        releaseSeat(`${el.dataset.fixture}-${el.dataset.seat}`, 'released');
         closeSheet();
         return;
       }
       case 'post-guest':
-      case 'post-list':
         // Guest name / list price are free text with no further screen that
         // needs to reflect them beyond the hero, so releasing the seat is
         // the whole state change.
-        releaseSeat(el.dataset.seat);
+        releaseSeat(el.dataset.seat, 'gifted');
+        closeSheet();
+        return;
+      case 'post-list':
+        releaseSeat(el.dataset.seat, 'listed');
         closeSheet();
         return;
     }
@@ -505,7 +559,7 @@ function main() {
       : 'What you owe. Each button opens with the amount and memo already set.';
     document.getElementById('settle-memo').textContent = memo;
     const links = {
-      venmo: `https://venmo.com/?txn=pay&amount=${amount}&note=${encodeURIComponent(memo)}`,
+      venmo: `https://venmo.com/?txn=${owed ? 'charge' : 'pay'}&amount=${amount}&note=${encodeURIComponent(memo)}`,
       cashapp: 'https://cash.app/$/summithearthbench',
       zelle: 'https://www.zellepay.com/',
     };

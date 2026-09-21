@@ -29,9 +29,39 @@ import matchday, pitch, bench, hearth, hometeam, visitors, settings, landing  # 
 LEAK_RE = re.compile(r">None<|>null<|>undefined<|>NaN<")
 
 
+VOID_ELEMENTS = {
+    "area", "base", "br", "col", "embed", "hr", "img", "input",
+    "link", "meta", "param", "source", "track", "wbr",
+}
+
+
 class StrictParser(html.parser.HTMLParser):
-    def error(self, message):  # pragma: no cover - only reached on malformed markup
-        raise AssertionError(message)
+    """HTMLParser's own error() hook is dead code — its "strict" mode was
+    removed in Python 3.5, and error() has never been called since, so
+    subclassing it alone (as this used to) validates nothing regardless of
+    how malformed the markup is. This adds the check the test actually
+    wants: every non-void tag opened must be closed, in order, with nothing
+    left open when the document ends."""
+
+    def __init__(self):
+        super().__init__()
+        self.stack = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag not in VOID_ELEMENTS:
+            self.stack.append(tag)
+
+    def handle_endtag(self, tag):
+        if tag in VOID_ELEMENTS:
+            return
+        if not self.stack or self.stack[-1] != tag:
+            raise AssertionError(f"mismatched closing tag </{tag}>; open tags were {self.stack}")
+        self.stack.pop()
+
+    def close(self):
+        super().close()
+        if self.stack:
+            raise AssertionError(f"unclosed tags at end of document: {self.stack}")
 
 
 class ViewsRenderCleanly(unittest.TestCase):
@@ -97,7 +127,9 @@ class FullPageIntegrity(unittest.TestCase):
         _, cls.page = build_mod.build()
 
     def test_page_parses_as_html(self):
-        StrictParser().feed(self.page)  # raises on malformed markup
+        parser = StrictParser()
+        parser.feed(self.page)
+        parser.close()  # raises on any tag left unclosed or mismatched
 
     def test_head_renders_markup_not_a_python_repr(self):
         # Regression: layout.head() returns a bare Raw(...); build.py joins
@@ -136,21 +168,26 @@ class FullPageIntegrity(unittest.TestCase):
                 self.assertIn(f'id="{target_id}"', self.page)
 
     def test_seat_pairs_have_exactly_one_visible_variant(self):
-        """Every [data-seat] group should start with exactly one non-hidden
-        state — never zero (invisible seat) or more than one (both shown)."""
+        """Every [data-seat] toggle pair should show exactly one non-hidden
+        state — never zero (invisible seat) or both. A seat's key
+        intentionally repeats across independent widgets (Matchday's hero,
+        the Pitch avatar strip, the Pitch action row, ...) so that src/app.js
+        can flip all of them at once; each occurrence renders its own
+        two-state pair, so this checks every consecutive pair rather than
+        summing hidden across all of a key's occurrences on the page."""
         seat_keys = set(re.findall(r'data-seat="([^"]+)"', self.page))
         for key in seat_keys:
             with self.subTest(seat=key):
-                # A crude but effective count: within each seat's block,
-                # 'hidden' should appear exactly (occurrences - 1) times
-                # for a two-state pair (open/claimed or held/released).
                 blocks = re.findall(
                     rf'<span data-seat="{re.escape(key)}" data-state="[a-z]+"( hidden)?>', self.page,
                 )
                 if not blocks:
                     continue
-                hidden_count = sum(1 for b in blocks if b)
-                self.assertEqual(hidden_count, len(blocks) - 1, (key, blocks))
+                self.assertEqual(len(blocks) % 2, 0, (key, blocks))
+                for i in range(0, len(blocks), 2):
+                    pair = blocks[i:i + 2]
+                    hidden_count = sum(1 for b in pair if b)
+                    self.assertEqual(hidden_count, 1, (key, i, blocks))
 
 
 if __name__ == "__main__":

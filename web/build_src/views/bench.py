@@ -11,7 +11,7 @@ from markup import h, Raw
 from icons import svg
 from components import badge
 from fmt import money, match_date, match_time
-from data import MEMBERS
+from data import MEMBERS, ME
 from seats import seat_key, claim_button
 
 
@@ -27,13 +27,15 @@ def open_seats(fixtures):
 def render(fixtures, bench_notes_by_id):
     on_bench = [(f, s) for f, s in open_seats(fixtures) if s["status"] == "bench"]
     listed = [(f, s) for f, s in open_seats(fixtures) if s["status"] == "listed"]
+    held_by_me = [(f, s) for f in fixtures for s in f["seats"] if s["holder"] == ME]
 
     return h(
         "div", {"cls": "view shell", "style": {"paddingTop": "16px"}, "data-tab": "bench"},
         h("h1", {"style": {"fontSize": "22px", "fontWeight": "800"}}, "The Bench"),
         h("p", {"style": {"margin": "4px 0 14px", "fontSize": "14px", "color": "var(--ink-mute)"}},
           "Seats nobody is holding, and anything the circle has listed outside."),
-        _section("Waiting for a sub", on_bench, bench_notes_by_id, claimable=True, sid="bench-waiting"),
+        _section("Waiting for a sub", on_bench, bench_notes_by_id, claimable=True, sid="bench-waiting",
+                  extra_cards=[held_seat_listing_card(f, s) for f, s in held_by_me]),
         _section("Listed outside the Hearth", listed, bench_notes_by_id, claimable=False, sid="bench-listed"),
         h("p", {"cls": "card", "style": {"color": "var(--ink-mute)"}, "id": "bench-empty",
                 "hidden": bool(on_bench or listed)},
@@ -41,18 +43,30 @@ def render(fixtures, bench_notes_by_id):
     )
 
 
-def _section(title, rows, notes_by_id, claimable, sid):
+def _section(title, rows, notes_by_id, claimable, sid, extra_cards=None):
+    cards = [seat_card(f, s, notes_by_id, claimable) for f, s in rows] + (extra_cards or [])
     return h(
         "section", {"style": {"marginBottom": "18px"}, "id": sid, "hidden": not rows},
         h("h2", {"style": {"fontSize": "15px", "margin": "0 0 8px"}}, title),
-        h("div", {"cls": "grid-auto"}, [seat_card(f, s, notes_by_id, claimable) for f, s in rows]),
+        h("div", {"cls": "grid-auto"}, cards),
     )
 
 
-def seat_card(fixture, seat, notes_by_id, claimable):
+def held_seat_listing_card(fixture, seat):
+    """A hidden Bench card for a seat you currently hold, pre-rendered so
+    "Release to the Bench" can reveal it instantly. Keyed with a distinct
+    `:listing` suffix, separate from the seat's own held/released toggle
+    (seats.py), so gifting or listing the seat externally — which also
+    flips the seat to "released" everywhere else — does not wrongly make
+    it claimable here too."""
+    return seat_card(fixture, seat, {}, claimable=True,
+                      key_override=f'{seat_key(fixture["id"], seat["number"])}:listing', hidden=True)
+
+
+def seat_card(fixture, seat, notes_by_id, claimable, key_override=None, hidden=False):
     note = notes_by_id.get(seat.get("bench_note_id")) if seat.get("bench_note_id") else None
     free = note is not None and note["cost_path"] == "free"
-    key = seat_key(fixture["id"], seat["number"])
+    key = key_override or seat_key(fixture["id"], seat["number"])
     from data import SYNDICATES
     home_seat = SYNDICATES[0]["seats"][0]
 
@@ -88,6 +102,6 @@ def seat_card(fixture, seat, notes_by_id, claimable):
 
     return h(
         "article", {"cls": "card", "style": {"borderLeft": f'3px solid {"var(--summit-sandstone)" if claimable else "var(--hairline-strong)"}'},
-                     "data-seat": key, "data-state": "open", "data-bench-card": "true"},
+                     "data-seat": key, "data-state": "open", "data-bench-card": "true", "hidden": hidden},
         body,
     )

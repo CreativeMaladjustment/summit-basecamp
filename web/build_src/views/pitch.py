@@ -57,8 +57,15 @@ def fixture_row(f):
 
     actions = []
     if my_seat:
-        actions.append(h("button", {"cls": "btn btn--ghost", "type": "button",
-                                     "data-open-sheet": f'sheet-callasub-{f["id"]}-{my_seat["number"]}'}, "Call a Sub"))
+        my_key = seat_key(f["id"], my_seat["number"])
+        actions.append(h(
+            "span", None,
+            h("span", {"data-seat": my_key, "data-state": "held"},
+              h("button", {"cls": "btn btn--ghost", "type": "button",
+                            "data-open-sheet": f'sheet-callasub-{f["id"]}-{my_seat["number"]}'}, "Call a Sub")),
+            h("span", {"data-seat": my_key, "data-state": "released", "hidden": True},
+              badge("Handed off — see the Bench", "mute")),
+        ))
     if open_seat:
         actions.append(claim_button("Take the Pitch", seat_key(f["id"], open_seat["number"]), cls="btn btn--primary"))
 

@@ -52,8 +52,11 @@ def open_seats(fixtures):
 
 
 def build():
-    fixtures_2026 = [f for f in D.FIXTURES if f["season"] == 2026]
-    bench_count = len([1 for f, s in open_seats(fixtures_2026) if s["status"] == "bench"])
+    fixtures_2026 = sorted((f for f in D.FIXTURES if f["season"] == 2026), key=lambda f: f["kickoff"])
+    # Matches refreshBenchCount() in app.js, which counts every visible Bench
+    # card (waiting *and* listed), so the pre-rendered badge doesn't jump the
+    # moment app.js repaints it.
+    bench_count = len(open_seats(fixtures_2026))
     notes_by_id = {n["id"]: n for n in D.BENCH_NOTES}
     ledger_2026 = D.LEDGER[2026]
     my_balance = ledger_2026["paid"].get(D.ME, 0) - ledger_2026["owed"].get(D.ME, 0)
@@ -86,7 +89,9 @@ def build():
 
     body = h(
         "body", None,
-        h("main", {"id": "app"},
+        # A plain container, not <main> — app_stage already has its own
+        # <main> for the active screen, and HTML forbids nested main landmarks.
+        h("div", {"id": "app"},
           landing.landing(),
           landing.syndicate(),
           app_stage,

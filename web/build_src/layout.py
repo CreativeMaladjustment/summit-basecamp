@@ -3,7 +3,7 @@ shares. Nav sections and sheets are toggled by `hidden` in src/app.js — this
 module only emits markup, never picks what's currently visible."""
 from __future__ import annotations
 
-from markup import h, Raw
+from markup import h, Raw, El
 from icons import svg
 from data import SYNDICATES, SEASONS
 
@@ -54,10 +54,16 @@ def lockup(size=40, icon_size=21):
 
 
 def header(open_seats_count):
+    # Every screen is pre-rendered from SYNDICATES[0]'s fixtures, seats and
+    # members only, so picking another syndicate here has nothing to switch
+    # to yet — disable rather than leave a control that silently does
+    # nothing. Multi-syndicate rendering is a build_src change, not
+    # something src/app.js can fake at runtime.
     switcher = h(
         "select", {"id": "syn-switch", "cls": "select",
                    "style": {"maxWidth": "100%", "fontWeight": "600", "minHeight": "40px"},
-                   "data-role": "syndicate-switch"},
+                   "data-role": "syndicate-switch", "disabled": True,
+                   "title": "Switching syndicates is coming soon"},
         [h("option", {"value": s["id"], "selected": s["id"] == SYNDICATES[0]["id"]},
            f'{s["name"]} — {s["holds"]}') for s in SYNDICATES],
     )
@@ -110,10 +116,22 @@ def header(open_seats_count):
 
 
 def sheet_template(sheet_id, body_children):
-    """A backdrop+sheet pair, hidden until src/app.js clears `hidden`."""
+    """A backdrop+sheet pair, hidden until src/app.js clears `hidden`. Every
+    sheet carries an `<h2 class="sheet__title">` somewhere in its body — give
+    it an id and point the dialog's `aria-labelledby` at it, so screen
+    readers announce the sheet by name instead of as an unlabeled dialog."""
+    heading_id = f"{sheet_id}-heading"
+    for child in body_children:
+        if isinstance(child, El) and child.tag == "h2":
+            # The settle-up sheet's heading already carries an id app.js
+            # updates by textContent — keep it rather than overwrite it.
+            heading_id = child.attrs.get("id") or heading_id
+            child.attrs["id"] = heading_id
+            break
+
     return h(
         "div", {"id": sheet_id, "cls": "sheet-backdrop", "hidden": True, "data-role": "sheet"},
-        h("div", {"cls": "sheet", "role": "dialog", "aria-modal": "true"},
+        h("div", {"cls": "sheet", "role": "dialog", "aria-modal": "true", "aria-labelledby": heading_id},
           h("div", {"cls": "sheet__handle"}),
           h("div", {"data-role": "sheet-body"}, *body_children)),
     )

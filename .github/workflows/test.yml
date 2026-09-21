@@ -1,0 +1,59 @@
+name: Test
+
+# Runs the Python unit test suites and checks that web/index.html — a
+# generated artifact committed to the repo — actually matches what
+# web/build_src/build.py produces, so a build_src change that never got
+# rebuilt into index.html fails here instead of silently shipping stale
+# markup.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unittest:
+    name: Python unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Run backend tests
+        if: hashFiles('tests/**/*.py') != ''
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Run frontend build tests
+        if: hashFiles('web/tests/**/*.py') != ''
+        run: python3 -m unittest discover -s web/tests -v
+
+  index-html-fresh:
+    name: web/index.html matches build_src
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Rebuild and diff
+        if: hashFiles('web/build_src/build.py') != ''
+        run: |
+          set -euo pipefail
+          cp web/index.html /tmp/index.html.committed
+          python3 web/build_src/build.py
+          if ! diff -u /tmp/index.html.committed web/index.html; then
+            echo "::error::web/index.html is stale — run 'python3 web/build_src/build.py' and commit the result."
+            exit 1
+          fi

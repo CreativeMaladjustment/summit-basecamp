@@ -69,8 +69,16 @@ def seat_pair(fixture, seat, lg=False, on_dark=False):
 def seat_avatar_toggle(fixture, seat):
     """Pitch's avatar strip entry: open (dashed +) vs claimed (You), both
     pre-rendered and keyed to the same data-seat so a claim anywhere updates
-    every occurrence of this seat."""
+    every occurrence of this seat. A seat currently held by you gets the
+    same held/released pair Matchday's hero uses (seat_pair), so releasing
+    it from Call a Sub updates the Pitch avatar too."""
     key = seat_key(fixture["id"], seat["number"])
+    if seat["holder"] == ME:
+        return h(
+            "span", None,
+            h("span", {"data-seat": key, "data-state": "held"}, avatar(ME)),
+            h("span", {"data-seat": key, "data-state": "released", "hidden": True}, avatar(None)),
+        )
     if not is_claimable(seat):
         return avatar(seat["holder"])
     return h(

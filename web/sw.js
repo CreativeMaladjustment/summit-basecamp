@@ -27,7 +27,17 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
+  // Stale-while-revalidate: answer from cache immediately when there's a
+  // hit (fast, works offline), but always refetch in the background and
+  // update the cache, so a new deploy is picked up on the next load without
+  // depending on someone remembering to bump CACHE.
   e.respondWith(
-    caches.match(e.request).then((hit) => hit ?? fetch(e.request)),
+    caches.open(CACHE).then((cache) => cache.match(e.request).then((hit) => {
+      const network = fetch(e.request).then((res) => {
+        if (res.ok) cache.put(e.request, res.clone());
+        return res;
+      }).catch(() => hit);
+      return hit ?? network;
+    })),
   );
 });

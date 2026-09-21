@@ -78,7 +78,7 @@ def build(fixture):
                      "data-opponent": fixture["opponent"], "data-short": fixture["short"], "data-face-cents": str(face)},
           "Post to the Bench"),
         h("button", {"cls": "btn btn--ghost btn--block", "type": "button", "style": {"marginTop": "8px"},
-                     "data-close-sheet": "true"}, "Back"),
+                     "data-open-sheet": ids["root"]}, "Back"),
     ])
 
     guest = sheet_template(ids["guest"], [
@@ -90,7 +90,7 @@ def build(fixture):
         h("button", {"cls": "btn btn--primary btn--block", "type": "button", "style": {"marginTop": "12px"},
                      "data-role": "post-guest", "data-seat": seat_key}, "Send the seat"),
         h("button", {"cls": "btn btn--ghost btn--block", "type": "button", "style": {"marginTop": "8px"},
-                     "data-close-sheet": "true"}, "Back"),
+                     "data-open-sheet": ids["root"]}, "Back"),
     ])
 
     list_ = sheet_template(ids["list"], [
@@ -103,7 +103,7 @@ def build(fixture):
         h("button", {"cls": "btn btn--ember btn--block", "type": "button", "style": {"marginTop": "12px"},
                      "data-role": "post-list", "data-seat": seat_key}, "Mark as listed"),
         h("button", {"cls": "btn btn--ghost btn--block", "type": "button", "style": {"marginTop": "8px"},
-                     "data-close-sheet": "true"}, "Back"),
+                     "data-open-sheet": ids["root"]}, "Back"),
     ])
 
     return ids, [root, release, guest, list_]

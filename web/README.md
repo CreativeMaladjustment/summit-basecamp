@@ -115,6 +115,14 @@ for anything that has to be live rather than pre-rendered, adding a fetch in
 `src/app.js` and a spot for it to patch into the DOM the same way a dropped
 photo does).
 
+**Caution:** anything baked in at build time lands in `index.html`, which
+ships as a static, publicly-readable file on Cloudflare Pages. Real
+syndicate data — member balances, debts, contact info, seat assignments —
+must not be fetched at build time; only data every visitor may see belongs
+in the pre-rendered shell. Per-syndicate or per-member data stays behind a
+runtime fetch (session-authenticated, against the D1-backed API) so it's
+only ever served to someone who's signed in.
+
 `wrangler dev` cannot start in this sandbox — workerd's fetch of the Pyodide
 runtime is blocked by the egress proxy — so `build.py` is also how this
 frontend's Python actually gets exercised locally; it needs nothing wrangler
