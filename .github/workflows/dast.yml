@@ -108,6 +108,13 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
+          # GitHub Actions always invokes `shell: bash` with -e, and `set -uo
+          # pipefail` above only adds options, it doesn't clear -e. Without
+          # this, zap-baseline.py's own exit code (2 for warnings-only, its
+          # normal, non-fatal outcome here) aborts the script on the spot and
+          # the `echo "exit-code=$?"` below never runs — so the Report step
+          # always sees an empty exit-code and fails the job.
+          set +e
           mkdir -p zap-out
           cp .zap/rules.tsv zap-out/rules.tsv
           chmod -R 777 zap-out
@@ -190,6 +197,11 @@ jobs:
           TARGET: ${{ inputs.target-url || vars.DAST_TARGET_URL }}
         run: |
           set -uo pipefail
+          # See the same fix in the local-target job: -e survives `set -uo
+          # pipefail` (it only adds options), so without `set +e` a non-zero
+          # zap-baseline.py exit aborts the script before `echo
+          # "exit-code=$?"` ever runs.
+          set +e
           mkdir -p zap-out
           cp .zap/rules.tsv zap-out/rules.tsv
           chmod -R 777 zap-out
