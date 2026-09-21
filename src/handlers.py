@@ -4,6 +4,8 @@ Every handler takes ``(request, env, params)`` and returns a Response.
 ``params`` holds the path parameters the router pulled out of the URL.
 """
 
+import json
+
 from auth import current_user, require_admin, require_membership
 from db import batch, execute, new_id, query, query_one
 from responses import ApiError, json_response, read_json, require, require_int
@@ -486,6 +488,41 @@ async def bio_of_the_day(request, env, params):
     if bio is None:
         raise ApiError(404, "No player bio is scheduled yet")
     return json_response({"bio": bio})
+
+
+# --- roster and opponents ---------------------------------------------------
+
+
+async def list_roster(request, env, params):
+    """The home squad, for the Home Team screen. Club-wide, not per-syndicate."""
+    await current_user(request, env)
+    players = await query(
+        env,
+        "SELECT * FROM roster_players ORDER BY sort_order, jersey_number",
+    )
+    for player in players:
+        player["stats"] = json.loads(player.pop("stats_json"))
+    return json_response({"players": players})
+
+
+async def list_opponents(request, env, params):
+    """Visiting-club dossiers, for the Visitors screen."""
+    await current_user(request, env)
+    opponents = await query(
+        env, "SELECT * FROM opponents ORDER BY sort_order"
+    )
+    players = await query(
+        env,
+        "SELECT * FROM opponent_players ORDER BY sort_order, jersey_number",
+    )
+    by_opponent = {}
+    for player in players:
+        by_opponent.setdefault(player["opponent_id"], []).append(player)
+
+    for opponent in opponents:
+        opponent["quick_stats"] = json.loads(opponent.pop("quick_stats_json"))
+        opponent["players"] = by_opponent.get(opponent["id"], [])
+    return json_response({"opponents": opponents})
 
 
 # --- preferences -----------------------------------------------------------

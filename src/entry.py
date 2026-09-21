@@ -33,6 +33,8 @@ router.add("POST", "/api/groups/{group_id}/expenses", handlers.create_expense)
 router.add("POST", "/api/groups/{group_id}/settle", handlers.settle_up)
 
 router.add("GET", "/api/bios/today", handlers.bio_of_the_day)
+router.add("GET", "/api/roster", handlers.list_roster)
+router.add("GET", "/api/opponents", handlers.list_opponents)
 router.add("GET", "/api/preferences", handlers.get_preferences)
 router.add("PUT", "/api/preferences", handlers.update_preferences)
 

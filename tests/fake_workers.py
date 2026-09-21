@@ -152,10 +152,16 @@ class FakeRequest:
 
 
 def make_env(schema_path, seed_path=None, environment="development"):
+    """``schema_path`` is one migration file, or a list applied in order --
+    mirroring how ``wrangler d1 migrations apply`` runs every file in
+    ``migrations/`` in sequence.
+    """
     connection = sqlite3.connect(":memory:")
     connection.row_factory = sqlite3.Row
-    with open(schema_path) as handle:
-        connection.executescript(handle.read())
+    schema_paths = [schema_path] if isinstance(schema_path, str) else schema_path
+    for path in schema_paths:
+        with open(path) as handle:
+            connection.executescript(handle.read())
     if seed_path:
         with open(seed_path) as handle:
             connection.executescript(handle.read())
