@@ -1,0 +1,149 @@
+name: Provision Cloudflare resources
+
+# One-off bootstrap: creates the KV namespace and D1 database that
+# wrangler.jsonc currently references with placeholder ids
+# (REPLACE_WITH_KV_NAMESPACE_ID / REPLACE_WITH_D1_DATABASE_ID), then opens a
+# PR wiring the real ids in. Manual only, since it creates billed Cloudflare
+# resources and this repo never pushes straight to main.
+#
+# Safe to re-run: each step first checks whether its placeholder is still
+# present and skips otherwise, so it never creates the same resource twice.
+
+on:
+  workflow_dispatch:
+    inputs:
+      resource:
+        description: What to provision
+        required: false
+        default: all
+        type: choice
+        options: [all, kv, d1]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provision-cloudflare
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    name: Create resources and open a PR
+    runs-on: ubuntu-latest
+    environment: shb
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+
+      - name: Install Wrangler
+        run: npm install --no-save wrangler@4.135.0
+
+      - name: Create KV namespace
+        id: kv
+        if: inputs.resource == 'all' || inputs.resource == 'kv'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if ! grep -q 'REPLACE_WITH_KV_NAMESPACE_ID' wrangler.jsonc; then
+            echo "KV namespace id already set, skipping."
+            exit 0
+          fi
+
+          # A namespace named SESSIONS may already exist from a prior run of
+          # this workflow whose PR hasn't merged yet. Reuse it instead of
+          # creating (and billing for) a duplicate.
+          id="$(npx --no-install wrangler kv namespace list \
+            | jq -r '.[] | select(.title == "SESSIONS") | .id' | head -n1 || true)"
+
+          if [ -z "$id" ]; then
+            output="$(npx --no-install wrangler kv namespace create SESSIONS)"
+            echo "$output"
+            id="$(printf '%s' "$output" \
+              | grep -oE '"?id"? *[:=] *"[0-9a-f]{32}"' \
+              | grep -oE '[0-9a-f]{32}' | head -n1 || true)"
+          else
+            echo "Reusing existing SESSIONS namespace ($id)."
+          fi
+
+          if [ -z "$id" ]; then
+            echo "::error::Could not find the namespace id in Wrangler's output above. Update wrangler.jsonc by hand with the id shown there."
+            exit 1
+          fi
+
+          sed -i "s/REPLACE_WITH_KV_NAMESPACE_ID/$id/" wrangler.jsonc
+          echo "created=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create D1 database
+        id: d1
+        if: inputs.resource == 'all' || inputs.resource == 'd1'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if ! grep -q 'REPLACE_WITH_D1_DATABASE_ID' wrangler.jsonc; then
+            echo "D1 database id already set, skipping."
+            exit 0
+          fi
+
+          # A database named summit-hearth-db may already exist from a prior
+          # run of this workflow whose PR hasn't merged yet. Reuse it instead
+          # of creating (and billing for) a duplicate.
+          id="$(npx --no-install wrangler d1 list --json \
+            | jq -r '.[] | select(.name == "summit-hearth-db") | .uuid' | head -n1 || true)"
+
+          if [ -z "$id" ]; then
+            output="$(npx --no-install wrangler d1 create summit-hearth-db)"
+            echo "$output"
+            # Wrangler prints the config snippet to add in TOML form
+            # (database_id = "..."), not JSON, so match the key/value pair
+            # with optional quotes around the key and either separator.
+            id="$(printf '%s' "$output" \
+              | grep -oE '"?database_id"? *[:=] *"[0-9a-f-]{36}"' \
+              | grep -oE '[0-9a-f-]{36}' | head -n1 || true)"
+          else
+            echo "Reusing existing summit-hearth-db database ($id)."
+          fi
+
+          if [ -z "$id" ]; then
+            echo "::error::Could not find the database id in Wrangler's output above. Update wrangler.jsonc by hand with the id shown there."
+            exit 1
+          fi
+
+          sed -i "s/REPLACE_WITH_D1_DATABASE_ID/$id/" wrangler.jsonc
+          echo "created=true" >> "$GITHUB_OUTPUT"
+
+      - name: Open a pull request with the real ids
+        if: steps.kv.outputs.created == 'true' || steps.d1.outputs.created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branch="provision-cloudflare-resources-${{ github.run_id }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add wrangler.jsonc
+          git commit -m "Wire real Cloudflare resource ids into wrangler.jsonc"
+          # -B and --force handle a re-run of this same workflow run (same
+          # run_id, so same branch name) picking up after a transient
+          # failure in this step.
+          git push --force origin "$branch"
+
+          if gh pr list --head "$branch" --state open --json number --jq '.[0].number' | grep -q .; then
+            echo "PR for $branch already open, nothing more to do."
+          else
+            gh pr create \
+              --title "Wire real Cloudflare resource ids into wrangler.jsonc" \
+              --body "Created by the Provision Cloudflare resources workflow (run ${{ github.run_id }}). Replaces the placeholder KV namespace and/or D1 database id in wrangler.jsonc with the id(s) of the resource(s) just created in the Cloudflare account behind the shb environment." \
+              --base main \
+              --head "$branch"
+          fi
