@@ -65,14 +65,27 @@ jobs:
 
           # D1 database name, for applying migrations. Read it out of the
           # wrangler config rather than hardcoding it, so renaming the database
-          # in one place is enough.
+          # in one place is enough. wrangler supports wrangler.toml as well as
+          # wrangler.json/wrangler.jsonc (JSON with // and /* */ comments
+          # allowed), so parse whichever format is present.
           database="${D1_OVERRIDE:-}"
-          if [ -z "$database" ] && [ -n "$config" ] && [ "${config##*.}" = "toml" ]; then
+          if [ -z "$database" ] && [ -n "$config" ]; then
             database="$(python3 - "$config" <<'PY' || true
-          import sys, tomllib
+          import json, re, sys, tomllib
+
+          path = sys.argv[1]
           try:
-              with open(sys.argv[1], "rb") as fh:
-                  cfg = tomllib.load(fh)
+              if path.endswith(".toml"):
+                  with open(path, "rb") as fh:
+                      cfg = tomllib.load(fh)
+              else:
+                  with open(path, "r", encoding="utf-8") as fh:
+                      text = fh.read()
+                  # Strip // line comments and /* */ block comments so the
+                  # jsonc wrangler.jsonc format parses as plain JSON.
+                  text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
+                  text = re.sub(r"(?m)^\s*//.*$", "", text)
+                  cfg = json.loads(text)
           except Exception:
               raise SystemExit(0)
           dbs = cfg.get("d1_databases") or []
