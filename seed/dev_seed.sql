@@ -51,22 +51,45 @@ INSERT INTO player_bios (id, player_name, team, jersey_number, position, bio_mar
 INSERT INTO user_notification_prefs (user_id) VALUES
     ('usr_ada'), ('usr_bo'), ('usr_cyd'), ('usr_dev');
 
--- Home-team squad and opponent dossiers, backing the Home Team and Visitors
--- screens (migrations/0002_roster.sql). Transcribed one-for-one from the
--- data still baked into the current frontend build
--- (web/build_src/data.py: SQUAD, OPPONENTS).
+-- Home-team squad, backing the Home Team screen (migrations/0002_roster.sql).
+-- Transcribed from the official roster at nwslsoccer.com/teams/
+-- cbfcacbef5bc4a278442c00926ac9ebc/denver-summit-fc/roster (2026-09-21
+-- snapshot): jersey number, position and nationality only -- the site does
+-- not publish season stats or scouting-style bios, so those columns stay
+-- factual rather than invented. No headshots: image_path keeps the table's
+-- placeholder-avatar default (see web/build_src/data.py for why).
+-- Opponent dossiers below are still fictional -- a stand-in until real
+-- scouting data for those clubs exists.
 
 INSERT INTO roster_players (id, team, jersey_number, name, position, stats_json, scouting_note, sort_order) VALUES
-    ('p1', 'Denver Summit FC', 1, 'Rowan Vasquez', 'GK', '[["Clean sheets", "7"], ["Saves", "54"], ["Starts", "19"]]', 'Comes for everything in the six. The Hearth breathes easier when she claims the first cross.', 0),
-    ('p2', 'Denver Summit FC', 4, 'Imani Brooks', 'DEF', '[["Tackles", "48"], ["Duels won", "62%"], ["Starts", "21"]]', 'Steps in front of the pass rather than chasing it. Reads the game a beat early.', 1),
-    ('p3', 'Denver Summit FC', 5, 'Freja Lindholm', 'DEF', '[["Clearances", "71"], ["Aerials", "58%"], ["Starts", "20"]]', 'The bench captain in everything but the armband. Organises the line from kickoff.', 2),
-    ('p4', 'Denver Summit FC', 6, 'Priya Raman', 'MID', '[["Passes", "1,204"], ["Accuracy", "88%"], ["Starts", "22"]]', 'Sets the tempo the way you bank a fire — quietly, and all night.', 3),
-    ('p5', 'Denver Summit FC', 8, 'Nadia Okafor', 'MID', '[["Assists", "9"], ["Key passes", "41"], ["Starts", "18"]]', 'Finds the runner nobody else saw. Watch her shoulders, not the ball.', 4),
-    ('p6', 'Denver Summit FC', 10, 'Sloane Beckett', 'MID', '[["Goals", "6"], ["Assists", "11"], ["Starts", "21"]]', 'Drops off the front line to collect, then turns. The whole attack pivots on that turn.', 5),
-    ('p7', 'Denver Summit FC', 9, 'Tess Aldridge', 'FWD', '[["Goals", "14"], ["Shots/90", "3.8"], ["Starts", "22"]]', 'Runs the channel until the centre-back blinks. Fourteen goals say the blink comes.', 6),
-    ('p8', 'Denver Summit FC', 11, 'Juno Park', 'FWD', '[["Goals", "8"], ["Dribbles", "63"], ["Starts", "17"]]', 'Takes the outside shoulder every time, and it works roughly every third time.', 7),
-    ('p9', 'Denver Summit FC', 17, 'Camille Duarte', 'FWD', '[["Goals", "5"], ["Sub apps", "14"], ["Minutes", "612"]]', 'The sub who changes the temperature. Rarely starts, often decides.', 8),
-    ('p10', 'Denver Summit FC', 23, 'Harper Nakamura', 'DEF', '[["Interceptions", "39"], ["Crosses", "52"], ["Starts", "16"]]', 'Overlaps into the space Juno vacates. The two of them read each other well.', 9);
+    ('p1', 'Denver Summit FC', 1, 'Abby Smith', 'GK', '[["Position", "Goalkeeper"], ["Nationality", "USA"]]', 'Denver Summit FC goalkeeper. See the club''s official roster for 2026 season statistics.', 0),
+    ('p2', 'Denver Summit FC', 17, 'Jordan Nytes', 'GK', '[["Position", "Goalkeeper"], ["Nationality", "USA"]]', 'Denver Summit FC goalkeeper. See the club''s official roster for 2026 season statistics.', 1),
+    ('p3', 'Denver Summit FC', 36, 'Kat Asman', 'GK', '[["Position", "Goalkeeper"], ["Nationality", "USA"]]', 'Denver Summit FC goalkeeper. See the club''s official roster for 2026 season statistics.', 2),
+    ('p4', 'Denver Summit FC', 2, 'Megan Reid', 'DEF', '[["Position", "Defender"], ["Nationality", "CAN"]]', 'Denver Summit FC defender. See the club''s official roster for 2026 season statistics.', 3),
+    ('p5', 'Denver Summit FC', 3, 'Kaleigh Kurtz', 'DEF', '[["Position", "Defender"], ["Nationality", "USA"]]', 'Denver Summit FC defender. See the club''s official roster for 2026 season statistics.', 4),
+    ('p6', 'Denver Summit FC', 4, 'Natalie Means', 'DEF', '[["Position", "Defender"], ["Nationality", "USA"]]', 'Denver Summit FC defender. See the club''s official roster for 2026 season statistics.', 5),
+    ('p7', 'Denver Summit FC', 7, 'Ayo Oke', 'DEF', '[["Position", "Defender"], ["Nationality", "USA"]]', 'Denver Summit FC defender. See the club''s official roster for 2026 season statistics.', 6),
+    ('p8', 'Denver Summit FC', 13, 'Gemma Bonner', 'DEF', '[["Position", "Defender"], ["Nationality", "ENG"]]', 'Denver Summit FC defender. See the club''s official roster for 2026 season statistics.', 7),
+    ('p9', 'Denver Summit FC', 16, 'Carson Pickett', 'DEF', '[["Position", "Defender"], ["Nationality", "USA"]]', 'Denver Summit FC defender. See the club''s official roster for 2026 season statistics.', 8),
+    ('p10', 'Denver Summit FC', 23, 'Eva Gaetino', 'DEF', '[["Position", "Defender"], ["Nationality", "USA"]]', 'Denver Summit FC defender. See the club''s official roster for 2026 season statistics.', 9),
+    ('p11', 'Denver Summit FC', 30, 'Camryn Biegalski', 'DEF', '[["Position", "Defender"], ["Nationality", "USA"]]', 'Denver Summit FC defender. See the club''s official roster for 2026 season statistics.', 10),
+    ('p12', 'Denver Summit FC', 5, 'Devin Lynch', 'MID', '[["Position", "Midfielder"], ["Nationality", "USA"]]', 'Denver Summit FC midfielder. See the club''s official roster for 2026 season statistics.', 11),
+    ('p13', 'Denver Summit FC', 8, 'Emma Regan', 'MID', '[["Position", "Midfielder"], ["Nationality", "CAN"]]', 'Denver Summit FC midfielder. See the club''s official roster for 2026 season statistics.', 12),
+    ('p14', 'Denver Summit FC', 10, 'Lindsey Heaps', 'MID', '[["Position", "Midfielder"], ["Nationality", "USA"]]', 'Denver Summit FC midfielder. See the club''s official roster for 2026 season statistics.', 13),
+    ('p15', 'Denver Summit FC', 14, 'Yuna McCormack', 'MID', '[["Position", "Midfielder"], ["Nationality", "USA"]]', 'Denver Summit FC midfielder. See the club''s official roster for 2026 season statistics.', 14),
+    ('p16', 'Denver Summit FC', 15, 'Jordan Baggett', 'MID', '[["Position", "Midfielder"], ["Nationality", "USA"]]', 'Denver Summit FC midfielder. See the club''s official roster for 2026 season statistics.', 15),
+    ('p17', 'Denver Summit FC', 24, 'Delanie Sheehan', 'MID', '[["Position", "Midfielder"], ["Nationality", "USA"]]', 'Denver Summit FC midfielder. See the club''s official roster for 2026 season statistics.', 16),
+    ('p18', 'Denver Summit FC', 34, 'Meg Boade', 'MID', '[["Position", "Midfielder"], ["Nationality", "USA"]]', 'Denver Summit FC midfielder. See the club''s official roster for 2026 season statistics.', 17),
+    ('p19', 'Denver Summit FC', 6, 'Janine Sonis', 'FWD', '[["Position", "Forward"], ["Nationality", "CAN"]]', 'Denver Summit FC forward. See the club''s official roster for 2026 season statistics.', 18),
+    ('p20', 'Denver Summit FC', 9, 'Yazmeen Ryan', 'FWD', '[["Position", "Forward"], ["Nationality", "USA"]]', 'Denver Summit FC forward. See the club''s official roster for 2026 season statistics.', 19),
+    ('p21', 'Denver Summit FC', 11, 'Ally Brazier', 'FWD', '[["Position", "Forward"], ["Nationality", "USA"]]', 'Denver Summit FC forward. See the club''s official roster for 2026 season statistics.', 20),
+    ('p22', 'Denver Summit FC', 12, 'Jasmine Aikey', 'FWD', '[["Position", "Forward"], ["Nationality", "USA"]]', 'Denver Summit FC forward. See the club''s official roster for 2026 season statistics.', 21),
+    ('p23', 'Denver Summit FC', 18, 'Yuzuki Yamamoto', 'FWD', '[["Position", "Forward"], ["Nationality", "JPN"]]', 'Denver Summit FC forward. See the club''s official roster for 2026 season statistics.', 22),
+    ('p24', 'Denver Summit FC', 25, 'Melissa Kössler', 'FWD', '[["Position", "Forward"], ["Nationality", "DEU"]]', 'Denver Summit FC forward. See the club''s official roster for 2026 season statistics.', 23),
+    ('p25', 'Denver Summit FC', 26, 'Natasha Flint', 'FWD', '[["Position", "Forward"], ["Nationality", "ENG"]]', 'Denver Summit FC forward. See the club''s official roster for 2026 season statistics.', 24),
+    ('p26', 'Denver Summit FC', 33, 'Olivia Thomas', 'FWD', '[["Position", "Forward"], ["Nationality", "USA"]]', 'Denver Summit FC forward. See the club''s official roster for 2026 season statistics.', 25),
+    ('p27', 'Denver Summit FC', 79, 'Nahikari García', 'FWD', '[["Position", "Forward"], ["Nationality", "ESP"]]', 'Denver Summit FC forward. See the club''s official roster for 2026 season statistics.', 26),
+    ('p28', 'Denver Summit FC', 0, 'Faith Webber', 'FWD', '[["Position", "Forward"], ["Nationality", "USA"]]', 'Denver Summit FC forward. See the club''s official roster for 2026 season statistics.', 27);
 
 INSERT INTO opponents (id, club, chip_label, home_date, away_date, away_venue, form, shape_note, halftime_note, quick_stats_json, sort_order) VALUES
     ('op_por', 'Portland Thorns', 'Portland · 9/26', '9/26', '5/9', 'Providence Park', 'W W D L W', '4-3-3, inverted right back, high line they will not drop.', 'They press the goal kick for twenty minutes and then stop. Play through the first twenty and the second half opens up.', '[["Goals for", "31"], ["Goals against", "19"], ["Away wins", "5"]]', 0),
@@ -84,9 +107,8 @@ INSERT INTO opponent_players (id, opponent_id, jersey_number, name, position, is
     ('o8', 'op_acf', 3, 'Wren Okonkwo', 'DEF', 0, 'Left of the three. Comfortable stepping in, uncomfortable turning.', 1),
     ('o9', 'op_acf', 16, 'Tamsin Reyes', 'MID', 0, 'Runs the whole game at one speed. Tires after 70.', 2);
 
--- National-team history for a few players (migrations/0003_national_team.sql).
--- Fictional, like the rest of SQUAD -- a stand-in until the real roster lands.
-INSERT INTO national_team_appearances (id, player_id, country, year_start, year_end, sort_order) VALUES
-    ('nt_001', 'p7', 'USWNT', 2024, NULL, 0),         -- Tess Aldridge, still capped
-    ('nt_002', 'p6', 'Canada', 2019, 2022, 0),         -- Sloane Beckett, past caps
-    ('nt_003', 'p5', 'Nigeria', 2021, NULL, 0);        -- Nadia Okafor, still capped
+-- National-team history (migrations/0003_national_team.sql) is left empty:
+-- the roster page (roster_players above) gives current nationality, not cap
+-- history, and the previous rows here were invented to match the fictional
+-- SQUAD they were seeded alongside. Populate this once a sourced list of
+-- senior caps per player exists.

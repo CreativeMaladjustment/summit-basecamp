@@ -1,8 +1,15 @@
-"""Placeholder syndicate, fixture and roster data.
+"""Placeholder syndicate and fixture data, plus the real Denver Summit FC squad.
 
-Ported from the original src/data/mock.js one-for-one. Player names, numbers,
-stats and fixture dates are invented; swap in the real roster and the
-published fixture list when they exist.
+Syndicate/fixture data (members, seats, ledger) is still invented -- ported
+from the original src/data/mock.js. SQUAD is transcribed from the official
+roster at nwslsoccer.com/teams/cbfcacbef5bc4a278442c00926ac9ebc/denver-summit-fc/roster
+(2026-09-21 snapshot): jersey number, position and nationality only -- the
+site does not publish season stats or scouting-style bios, so `stats` and
+`note` stay factual rather than invented. No headshots are stored here;
+`photo_slot()` stays an empty drop target, and any photo added later should
+come from a source with a redistribution licence (e.g. Wikimedia Commons)
+rather than the NWSL site's own images, which is what src/sync_sources.py
+already restricts itself to via ALLOWED_LICENSE_PREFIXES.
 """
 from __future__ import annotations
 
@@ -112,36 +119,90 @@ def _urlenc(text):
 
 # ---------- Home Team (the Locker Room) ----------
 SQUAD = [
-    {"id": "p1", "num": 1, "name": "Rowan Vasquez", "pos": "GK",
-     "stats": [("Clean sheets", "7"), ("Saves", "54"), ("Starts", "19")],
-     "note": "Comes for everything in the six. The Hearth breathes easier when she claims the first cross."},
-    {"id": "p2", "num": 4, "name": "Imani Brooks", "pos": "DEF",
-     "stats": [("Tackles", "48"), ("Duels won", "62%"), ("Starts", "21")],
-     "note": "Steps in front of the pass rather than chasing it. Reads the game a beat early."},
-    {"id": "p3", "num": 5, "name": "Freja Lindholm", "pos": "DEF",
-     "stats": [("Clearances", "71"), ("Aerials", "58%"), ("Starts", "20")],
-     "note": "The bench captain in everything but the armband. Organises the line from kickoff."},
-    {"id": "p4", "num": 6, "name": "Priya Raman", "pos": "MID",
-     "stats": [("Passes", "1,204"), ("Accuracy", "88%"), ("Starts", "22")],
-     "note": "Sets the tempo the way you bank a fire — quietly, and all night."},
-    {"id": "p5", "num": 8, "name": "Nadia Okafor", "pos": "MID",
-     "stats": [("Assists", "9"), ("Key passes", "41"), ("Starts", "18")],
-     "note": "Finds the runner nobody else saw. Watch her shoulders, not the ball."},
-    {"id": "p6", "num": 10, "name": "Sloane Beckett", "pos": "MID",
-     "stats": [("Goals", "6"), ("Assists", "11"), ("Starts", "21")],
-     "note": "Drops off the front line to collect, then turns. The whole attack pivots on that turn."},
-    {"id": "p7", "num": 9, "name": "Tess Aldridge", "pos": "FWD",
-     "stats": [("Goals", "14"), ("Shots/90", "3.8"), ("Starts", "22")],
-     "note": "Runs the channel until the centre-back blinks. Fourteen goals say the blink comes."},
-    {"id": "p8", "num": 11, "name": "Juno Park", "pos": "FWD",
-     "stats": [("Goals", "8"), ("Dribbles", "63"), ("Starts", "17")],
-     "note": "Takes the outside shoulder every time, and it works roughly every third time."},
-    {"id": "p9", "num": 17, "name": "Camille Duarte", "pos": "FWD",
-     "stats": [("Goals", "5"), ("Sub apps", "14"), ("Minutes", "612")],
-     "note": "The sub who changes the temperature. Rarely starts, often decides."},
-    {"id": "p10", "num": 23, "name": "Harper Nakamura", "pos": "DEF",
-     "stats": [("Interceptions", "39"), ("Crosses", "52"), ("Starts", "16")],
-     "note": "Overlaps into the space Juno vacates. The two of them read each other well."},
+    {"id": "p1", "num": 1, "name": "Abby Smith", "pos": "GK",
+     "stats": [("Position", "Goalkeeper"), ("Nationality", "USA")],
+     "note": "Denver Summit FC goalkeeper. See the club's official roster for 2026 season statistics."},
+    {"id": "p2", "num": 17, "name": "Jordan Nytes", "pos": "GK",
+     "stats": [("Position", "Goalkeeper"), ("Nationality", "USA")],
+     "note": "Denver Summit FC goalkeeper. See the club's official roster for 2026 season statistics."},
+    {"id": "p3", "num": 36, "name": "Kat Asman", "pos": "GK",
+     "stats": [("Position", "Goalkeeper"), ("Nationality", "USA")],
+     "note": "Denver Summit FC goalkeeper. See the club's official roster for 2026 season statistics."},
+    {"id": "p4", "num": 2, "name": "Megan Reid", "pos": "DEF",
+     "stats": [("Position", "Defender"), ("Nationality", "CAN")],
+     "note": "Denver Summit FC defender. See the club's official roster for 2026 season statistics."},
+    {"id": "p5", "num": 3, "name": "Kaleigh Kurtz", "pos": "DEF",
+     "stats": [("Position", "Defender"), ("Nationality", "USA")],
+     "note": "Denver Summit FC defender. See the club's official roster for 2026 season statistics."},
+    {"id": "p6", "num": 4, "name": "Natalie Means", "pos": "DEF",
+     "stats": [("Position", "Defender"), ("Nationality", "USA")],
+     "note": "Denver Summit FC defender. See the club's official roster for 2026 season statistics."},
+    {"id": "p7", "num": 7, "name": "Ayo Oke", "pos": "DEF",
+     "stats": [("Position", "Defender"), ("Nationality", "USA")],
+     "note": "Denver Summit FC defender. See the club's official roster for 2026 season statistics."},
+    {"id": "p8", "num": 13, "name": "Gemma Bonner", "pos": "DEF",
+     "stats": [("Position", "Defender"), ("Nationality", "ENG")],
+     "note": "Denver Summit FC defender. See the club's official roster for 2026 season statistics."},
+    {"id": "p9", "num": 16, "name": "Carson Pickett", "pos": "DEF",
+     "stats": [("Position", "Defender"), ("Nationality", "USA")],
+     "note": "Denver Summit FC defender. See the club's official roster for 2026 season statistics."},
+    {"id": "p10", "num": 23, "name": "Eva Gaetino", "pos": "DEF",
+     "stats": [("Position", "Defender"), ("Nationality", "USA")],
+     "note": "Denver Summit FC defender. See the club's official roster for 2026 season statistics."},
+    {"id": "p11", "num": 30, "name": "Camryn Biegalski", "pos": "DEF",
+     "stats": [("Position", "Defender"), ("Nationality", "USA")],
+     "note": "Denver Summit FC defender. See the club's official roster for 2026 season statistics."},
+    {"id": "p12", "num": 5, "name": "Devin Lynch", "pos": "MID",
+     "stats": [("Position", "Midfielder"), ("Nationality", "USA")],
+     "note": "Denver Summit FC midfielder. See the club's official roster for 2026 season statistics."},
+    {"id": "p13", "num": 8, "name": "Emma Regan", "pos": "MID",
+     "stats": [("Position", "Midfielder"), ("Nationality", "CAN")],
+     "note": "Denver Summit FC midfielder. See the club's official roster for 2026 season statistics."},
+    {"id": "p14", "num": 10, "name": "Lindsey Heaps", "pos": "MID",
+     "stats": [("Position", "Midfielder"), ("Nationality", "USA")],
+     "note": "Denver Summit FC midfielder. See the club's official roster for 2026 season statistics."},
+    {"id": "p15", "num": 14, "name": "Yuna McCormack", "pos": "MID",
+     "stats": [("Position", "Midfielder"), ("Nationality", "USA")],
+     "note": "Denver Summit FC midfielder. See the club's official roster for 2026 season statistics."},
+    {"id": "p16", "num": 15, "name": "Jordan Baggett", "pos": "MID",
+     "stats": [("Position", "Midfielder"), ("Nationality", "USA")],
+     "note": "Denver Summit FC midfielder. See the club's official roster for 2026 season statistics."},
+    {"id": "p17", "num": 24, "name": "Delanie Sheehan", "pos": "MID",
+     "stats": [("Position", "Midfielder"), ("Nationality", "USA")],
+     "note": "Denver Summit FC midfielder. See the club's official roster for 2026 season statistics."},
+    {"id": "p18", "num": 34, "name": "Meg Boade", "pos": "MID",
+     "stats": [("Position", "Midfielder"), ("Nationality", "USA")],
+     "note": "Denver Summit FC midfielder. See the club's official roster for 2026 season statistics."},
+    {"id": "p19", "num": 6, "name": "Janine Sonis", "pos": "FWD",
+     "stats": [("Position", "Forward"), ("Nationality", "CAN")],
+     "note": "Denver Summit FC forward. See the club's official roster for 2026 season statistics."},
+    {"id": "p20", "num": 9, "name": "Yazmeen Ryan", "pos": "FWD",
+     "stats": [("Position", "Forward"), ("Nationality", "USA")],
+     "note": "Denver Summit FC forward. See the club's official roster for 2026 season statistics."},
+    {"id": "p21", "num": 11, "name": "Ally Brazier", "pos": "FWD",
+     "stats": [("Position", "Forward"), ("Nationality", "USA")],
+     "note": "Denver Summit FC forward. See the club's official roster for 2026 season statistics."},
+    {"id": "p22", "num": 12, "name": "Jasmine Aikey", "pos": "FWD",
+     "stats": [("Position", "Forward"), ("Nationality", "USA")],
+     "note": "Denver Summit FC forward. See the club's official roster for 2026 season statistics."},
+    {"id": "p23", "num": 18, "name": "Yuzuki Yamamoto", "pos": "FWD",
+     "stats": [("Position", "Forward"), ("Nationality", "JPN")],
+     "note": "Denver Summit FC forward. See the club's official roster for 2026 season statistics."},
+    {"id": "p24", "num": 25, "name": "Melissa Kössler", "pos": "FWD",
+     "stats": [("Position", "Forward"), ("Nationality", "DEU")],
+     "note": "Denver Summit FC forward. See the club's official roster for 2026 season statistics."},
+    {"id": "p25", "num": 26, "name": "Natasha Flint", "pos": "FWD",
+     "stats": [("Position", "Forward"), ("Nationality", "ENG")],
+     "note": "Denver Summit FC forward. See the club's official roster for 2026 season statistics."},
+    {"id": "p26", "num": 33, "name": "Olivia Thomas", "pos": "FWD",
+     "stats": [("Position", "Forward"), ("Nationality", "USA")],
+     "note": "Denver Summit FC forward. See the club's official roster for 2026 season statistics."},
+    {"id": "p27", "num": 79, "name": "Nahikari García", "pos": "FWD",
+     "stats": [("Position", "Forward"), ("Nationality", "ESP")],
+     "note": "Denver Summit FC forward. See the club's official roster for 2026 season statistics."},
+    {"id": "p28", "num": None, "name": "Faith Webber", "pos": "FWD",
+     "stats": [("Position", "Forward"), ("Nationality", "USA")],
+     "note": "Denver Summit FC forward. See the club's official roster for 2026 season statistics."},
 ]
 
 POSITIONS = ["Whole squad", "GK", "DEF", "MID", "FWD"]
@@ -191,9 +252,9 @@ OPPONENTS = [
 
 # ---------- Hearthside Notes ----------
 HEARTHSIDE_NOTES = [
-    {"kind": "player", "eyebrow": "Key player to watch", "num": 9, "name": "Tess Aldridge",
+    {"kind": "player", "eyebrow": "Key player to watch", "num": 9, "name": "Yazmeen Ryan",
      "pos": "Forward · Denver Summit FC",
-     "body": "Fourteen goals in twenty-two starts, and eleven of them from inside the six. She lives on the back shoulder."},
+     "body": "Wears the 9 up top for Summit this season. See the Locker Room tab for the full squad."},
     {"kind": "tactics", "eyebrow": "Rivalry note", "name": "Portland hold a high line",
      "body": "Portland have not dropped their line all season, and Summit have the two quickest forwards in the league. The game is decided in the twenty yards behind Dara Whitfield."},
     {"kind": "trivia", "eyebrow": "Tap to reveal", "question": "Summit Park sits at what elevation?",
