@@ -104,7 +104,7 @@ Tap targets ≥ 44px; toggles are `role="switch"` with `aria-checked`; the Heart
 
 ## Open questions & near-term scope
 
-- **Frontend/backend wiring** — no target date set; this is the largest remaining piece and touches every screen above.
+- **Frontend/backend wiring (feature next)** — no target date set; this is the largest remaining piece and touches every screen above.
 - **OIDC sign-in** — which providers' JWKS endpoints, and token lifetime/refresh strategy, are undecided.
 - **Push delivery** — the cron logic exists; the send mechanism (web push? provider?) is not chosen.
 - **Weighted expense splits** — the formula for tier-weighted shares and bench-release credit is "still being decided" per `docs/backend.md`; `split_equally` is the only implementation today.
