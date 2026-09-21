@@ -20,7 +20,7 @@ The repository (`creativemaladjustment/summit-hearth-and-bench`) has both halves
 
 | Role | Defined by | Can do |
 | --- | --- | --- |
-| Admin | `group_members.role = 'admin'`, the syndicate's creator by default | Everything a member can, plus add fixtures (`POST /api/groups/{id}/fixtures`) and (implicitly) manage membership |
+| Admin | `group_members.role = 'admin'`, the syndicate's creator by default | Everything a member can, plus add fixtures (`POST /api/groups/{id}/fixtures`). *No API route exists to add, remove, or promote members* — the only write to `group_members` is the one row inserted for the creator when a group is created (`src/handlers.py`); this is a gap, not a built admin capability. |
 | Member | `group_members.role = 'member'` | Belongs to one or more syndicates (`groups`); claims, releases, gifts or lists their own seats; records and settles expenses; sets their own notification preferences |
 | Guest | `seat_allocations.guest_name`, no `users` row | Receives a gifted seat; not a syndicate member, has no login or ledger entry |
 
@@ -33,7 +33,7 @@ Sign-in is Google or Apple OIDC (`users.auth_provider`); there is no email/passw
 | Screen | Purpose | Backed by |
 | --- | --- | --- |
 | Landing | Hearth & Bench lockup, tonight's Hearthside Notes as teasers, Continue with Google / Apple | `POST /api/auth/session` (OIDC exchange — **not implemented**, returns 501) |
-| Find your syndicate | Join by invite code, see circles you've been invited to, or start a new one | `GET /api/groups`, `POST /api/groups` |
+| Find your syndicate | Join by invite code, see circles you've been invited to, or start a new one | `GET /api/groups`, `POST /api/groups` (creating a syndicate is built; joining an existing one by invite code is **not** — see Open questions) |
 | Matchday | Next Match hero, Hearthside Notes carousel, bench note threads, balance line | `GET /api/groups/{id}/fixtures`, `GET /api/groups/{id}/ledger`, `GET /api/bios/today` |
 | The Pitch | Every home fixture in the season, filtered by All / My Matches / On the Bench | `GET /api/groups/{id}/fixtures`, `GET /api/fixtures/{id}/seats` |
 | The Bench | Seats waiting for a sub, plus anything listed on an external resale exchange | `GET /api/groups/{id}/listings` |
@@ -57,7 +57,7 @@ An expense (`POST /api/groups/{id}/expenses`) writes one `transactions` row per 
 ## Functional requirements
 
 1. **Authentication.** Sign in with Google or Apple; a session is a bearer token resolved server-side to a `users` row (`src/auth.py`). In development, `X-Dev-User` substitutes for the OIDC round trip. *Gap: the token exchange itself (`POST /api/auth/session`) is unbuilt — verifying the provider's ID token against its JWKS and writing a session into KV.*
-2. **Syndicate management.** A member creates a syndicate (name, season, total seats, package cost) and becomes its admin; other members join by invite code. Each syndicate has its own roster, fixtures and ledger.
+2. **Syndicate management.** A member creates a syndicate (name, season, total seats, package cost) and becomes its admin (`POST /api/groups`). Each syndicate has its own roster, fixtures and ledger. *Gap: there is no API route for another member to join an existing syndicate at all — by invite code or otherwise; `group_members` is only ever written once, for the creator, at creation time.*
 3. **Fixture & seat management.** An admin adds fixtures (opponent, kickoff time, venue, tier). Seats are created with the fixture and default to `confirmed`, assigned to each member's `default_seat_number`.
 4. **Seat handoff.** A seat holder can release, gift, or externally list a seat they can't use (see Seat handoff above); every seat has exactly one current status (`confirmed`, `on_bench`, `gifted`, `resale_listed`).
 5. **Bench liquidity.** Seats `on_bench` or `resale_listed` are surfaced via `GET /api/groups/{id}/listings` so another member can claim them before kickoff. A daily cron (10:00) finds seats still on the bench 3 days out for a nudge — *the nudge is logged, not delivered; push send is unbuilt.*
@@ -110,6 +110,6 @@ Tap targets ≥ 44px; toggles are `role="switch"` with `aria-checked`; the Heart
 - **Weighted expense splits** — the formula for tier-weighted shares and bench-release credit is "still being decided" per `docs/backend.md`; `split_equally` is the only implementation today.
 - **Roster/scouting data** — Home Team and Visitors have no backing endpoint; real player stats, positions and scouting notes need a data source and schema.
 - **Roster and fixture data sync (new requirement, added in review 2026-09-21).** Rather than hand-entering roster, fixture and bio data, pull it automatically: fixtures/schedule from the NWSL site (e.g. [Denver Summit's schedule page](https://www.nwslsoccer.com/teams/cbfcacbef5bc4a278442c00926ac9ebc/denver-summit/schedule)) and player headshots from Wikipedia — public data only, nothing copyrighted. Proposed shape: a scheduled job (a Worker cron or a GitHub Actions workflow running daily or weekly) that fetches both sources, diffs against `fixtures` and `player_bios`, and updates rows that have drifted out of sync. Not yet designed: exact scrape targets/selectors, how to attribute/cache Wikipedia images without copyright issues, and where the job runs (Worker cron vs. GitHub Actions).
-- **Invite codes** — "Find your syndicate" implies an invite-code mechanism; no generation/redemption endpoint appears in `docs/backend.md`'s list.
+- **Joining a syndicate (invite codes and membership management)** — there is no API route at all for a member to join an existing syndicate, or for an admin to add, remove, or promote one; `group_members` is written to only once, for the creator, when `POST /api/groups` runs. "Find your syndicate" implies an invite-code mechanism, but its generation and redemption, plus general membership management, are both unbuilt.
 
 This document reflects the repository as of 2026-09-21 (through PR #14, Cloudflare Pages provisioning). It should be revisited once the frontend/backend integration lands, since several "placeholder data" gaps above are expected to close then.
