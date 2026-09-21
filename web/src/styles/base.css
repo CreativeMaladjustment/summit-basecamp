@@ -1,0 +1,76 @@
+*, *::before, *::after { box-sizing: border-box; }
+
+/* Every screen and state in this app is pre-rendered and toggled by the
+   `hidden` attribute (src/app.js sets el.hidden, never inline styles or a
+   class). An element-specific `display` rule (e.g. .sheet-backdrop's
+   `display: flex`) is an author style and always beats the UA stylesheet's
+   default `[hidden] { display: none }`, so without this override a "hidden"
+   sheet backdrop stays on screen, stacked, intercepting every click. */
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.45;
+  text-wrap: pretty;
+  padding-bottom: 40px;
+}
+
+a { color: var(--summit-green); text-decoration: none; }
+a:hover { color: var(--summit-green-dark); text-decoration: underline; }
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  letter-spacing: -.02em;
+  margin: 0;
+}
+
+@keyframes ssFade { from { opacity: 0 } to { opacity: 1 } }
+@keyframes ssUp { from { transform: translateY(16px); opacity: .6 } to { transform: translateY(0); opacity: 1 } }
+@keyframes ssPop { from { transform: translateY(8px) scale(.98); opacity: 0 } to { transform: translateY(0) scale(1); opacity: 1 } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* The design is one responsive layout: a single column on a 390px phone that
+   reflows continuously up to a centred 1180px shell. No breakpoint switch. */
+.shell {
+  width: min(100%, var(--shell));
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+.view { animation: ssUp .24s ease both; }
+
+.grid-auto {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--summit-sunshine);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Rows that scroll sideways on a phone and simply fit on a desktop. */
+.scroll-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+.scroll-row::-webkit-scrollbar { display: none; }

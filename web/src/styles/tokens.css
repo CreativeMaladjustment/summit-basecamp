@@ -1,0 +1,34 @@
+/* Denver Summit FC palette, taken from the design export's inline styles. */
+:root {
+  color-scheme: light dark;
+
+  --summit-green: #1D6960;
+  --summit-green-deep: #134E48;
+  --summit-green-dark: #134640;
+  --summit-sandstone: #C84B31;
+  --summit-sandstone-deep: #A33A24;
+  --summit-sunshine: #F6BE00;
+  --summit-snow: #F8F7F2;
+  --summit-dark: #0D1F1D;
+  --summit-canvas-dark: #0A1413;
+
+  --canvas: light-dark(#F8F7F2, #0A1413);
+  --surface: light-dark(#FFFFFF, #10201E);
+  --surface-sunk: light-dark(#F1EFE7, #0E1B1A);
+  --ink: light-dark(#0D1F1D, #EDEAE0);
+  --ink-soft: light-dark(#3B4B48, #C3D0CD);
+  --ink-mute: light-dark(#5A6B68, #9DB2AE);
+  --hairline: light-dark(#E3DFD3, #1E3230);
+  --hairline-strong: light-dark(#CFCABA, #27403D);
+
+  --font-display: Archivo, system-ui, sans-serif;
+  --font-body: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --radius-sm: 8px;
+  --radius: 13px;
+  --radius-lg: 18px;
+
+  --shell: 1180px;
+  --tap: 44px;
+}
