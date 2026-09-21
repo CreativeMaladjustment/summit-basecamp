@@ -59,10 +59,14 @@ def build():
     my_balance = ledger_2026["paid"].get(D.ME, 0) - ledger_2026["owed"].get(D.ME, 0)
     nxt = next_fixture(fixtures_2026)
 
-    # Every seat currently held by "you" gets its own Call a Sub sheet set.
-    held_by_me = [f for f in D.FIXTURES for s in f["seats"] if s["holder"] == D.ME]
+    # One Call a Sub sheet set per fixture holding a seat of yours. Every
+    # "Call a Sub" button (pitch.py, matchday.py) only ever targets your
+    # first held seat in a fixture, so sheets are generated to match —
+    # once per fixture, not once per held seat (a fixture with two seats
+    # of yours would otherwise get a duplicate, id-colliding sheet set).
+    fixtures_held_by_me = [f for f in D.FIXTURES if any(s["holder"] == D.ME for s in f["seats"])]
     sheets = []
-    for f in held_by_me:
+    for f in fixtures_held_by_me:
         _, nodes = callasub.build(f)
         sheets.extend(nodes)
     sheets.append(hearth.settle_sheet())

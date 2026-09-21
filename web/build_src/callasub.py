@@ -10,6 +10,7 @@ from markup import h, Raw
 from icons import svg
 from layout import sheet_template
 from fmt import money
+from data import ME
 
 
 def sheet_ids(fixture_id, seat_number):
@@ -34,7 +35,7 @@ def _path(icon, tint, name, help_text, open_sheet_id):
 
 def build(fixture):
     """Returns (ids, [sheet_template nodes...]) for one held seat's Call a Sub flow."""
-    seat = next(s for s in fixture["seats"] if s["holder"] == "u_you")
+    seat = next(s for s in fixture["seats"] if s["holder"] == ME)
     ids = sheet_ids(fixture["id"], seat["number"])
     face = fixture["value_cents"]
     seat_key = f'{fixture["id"]}-{seat["number"]}'

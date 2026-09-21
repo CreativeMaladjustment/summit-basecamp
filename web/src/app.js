@@ -407,12 +407,26 @@ function main() {
         return;
       }
       case 'enable-push':
-        if (window.Notification?.requestPermission) Notification.requestPermission().catch(() => {});
-        setPref('pushEnabled', true);
-        paintDeviceBanner();
+        if (window.Notification?.requestPermission) {
+          Notification.requestPermission()
+            .then((permission) => {
+              setPref('pushEnabled', permission === 'granted');
+              paintDeviceBanner();
+            })
+            .catch(() => {
+              setPref('pushEnabled', false);
+              paintDeviceBanner();
+            });
+        } else {
+          // No Notification API to ask permission of (e.g. an iOS PWA
+          // relying on native push entitlements instead) — nothing to gate on.
+          setPref('pushEnabled', true);
+          paintDeviceBanner();
+        }
         return;
       case 'send-reply': {
         const input = document.getElementById(`reply-input-${el.dataset.note}`);
+        if (!input) return;
         addReply(el.dataset.note, input.value);
         input.value = '';
         return;

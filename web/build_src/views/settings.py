@@ -46,13 +46,18 @@ def device_banners():
             " (box with arrow) and select ", h("strong", None, "Add to Home Screen"),
             ", then open the app from your home screen to enable push notifications.")),
     )
+    # `paintDeviceBanner()` in app.js swaps the visible banner once it can
+    # check the device and `state.prefs.pushEnabled` (default false), so
+    # pre-render "prompt" visible to match that default rather than "active"
+    # — otherwise a user without JS, or in the instant before it runs, sees
+    # "Notifications Active" when nothing is actually enabled yet.
     prompt = h(
-        "div", {"cls": "card", "style": {"marginBottom": "12px"}, "data-device-banner": "prompt", "hidden": True},
+        "div", {"cls": "card", "style": {"marginBottom": "12px"}, "data-device-banner": "prompt", "hidden": False},
         h("button", {"cls": "btn btn--primary btn--block", "type": "button", "data-role": "enable-push"},
           "Enable Push Notifications"),
     )
     active = h(
-        "div", {"cls": "card", "style": {"marginBottom": "12px"}, "data-device-banner": "active", "hidden": False},
+        "div", {"cls": "card", "style": {"marginBottom": "12px"}, "data-device-banner": "active", "hidden": True},
         h("div", {"style": {"display": "flex", "alignItems": "center", "gap": "10px"}},
           h("span", {"aria-hidden": "true", "style": {"width": "10px", "height": "10px", "borderRadius": "50%",
                                                         "background": "#16A34A", "flex": "none"}}),
