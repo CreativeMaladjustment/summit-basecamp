@@ -1,0 +1,53 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "summit-hearth-api",
+  "main": "src/entry.py",
+  "compatibility_date": "2024-12-05",
+  "compatibility_flags": ["python_workers"],
+
+  // Non-secret config only. Secrets (SESSION_HMAC_SECRET, GOOGLE_CLIENT_ID,
+  // APPLE_CLIENT_ID) are set with `wrangler secret put <NAME>` and are never
+  // committed here.
+  "vars": {
+    "ENVIRONMENT": "production"
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "summit-hearth-db",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // No object storage binding: player headshots and crests are committed to
+  // frontend/public/assets/images/ and served by Pages. player_bios.image_path
+  // holds the root-relative path to each one.
+
+  "kv_namespaces": [
+    {
+      "binding": "SESSIONS",
+      "id": "REPLACE_WITH_KV_NAMESPACE_ID"
+    }
+  ],
+
+  "triggers": {
+    "crons": [
+      "0 8 * * *",
+      "0 10 * * *"
+    ]
+  },
+
+  "observability": {
+    "enabled": true
+  },
+
+  "env": {
+    "development": {
+      "vars": {
+        "ENVIRONMENT": "development"
+      }
+    }
+  }
+}

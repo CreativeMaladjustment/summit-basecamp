@@ -1,8 +1,12 @@
-# Python
+node_modules/
+.wrangler/
+.dev.vars
+dist/
 __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.venv/
 
 # Terraform
 .terraform/
