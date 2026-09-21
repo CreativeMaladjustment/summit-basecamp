@@ -38,8 +38,8 @@ Sign-in is Google or Apple OIDC (`users.auth_provider`); there is no email/passw
 | The Pitch | Every home fixture in the season, filtered by All / My Matches / On the Bench | `GET /api/groups/{id}/fixtures`, `GET /api/fixtures/{id}/seats` |
 | The Bench | Seats waiting for a sub, plus anything listed on an external resale exchange | `GET /api/groups/{id}/listings` |
 | The Hearth | Package cost, weighted tier split, simplified debts, Settle Up, season history | `GET /api/groups/{id}/ledger`, `POST /api/groups/{id}/expenses`, `POST /api/groups/{id}/settle` |
-| Home Team | Full squad roster with position filters, stats and scouting notes | Placeholder data only — no roster endpoint yet |
-| Visitors | The visiting club's dressing room: dossiers, halftime reads, danger flags | Placeholder data only — no roster endpoint yet |
+| Home Team | Full squad roster with position filters, stats and scouting notes | `GET /api/roster` (frontend still renders from `web/build_src/data.py`, not wired yet) |
+| Visitors | The visiting club's dressing room: dossiers, halftime reads, danger flags | `GET /api/opponents` (frontend still renders from `web/build_src/data.py`, not wired yet) |
 | Campfire Settings | Push permissions, matchday alerts, Hearthside Notes mix, profile | `GET/PUT /api/preferences` |
 
 ### Seat handoff ("Call a Sub")
@@ -64,14 +64,13 @@ An expense (`POST /api/groups/{id}/expenses`) writes one `transactions` row per 
 6. **Expense tracking & settlement.** Any member records an expense, split (currently equally) across the syndicate; the ledger (`GET /api/groups/{id}/ledger`) shows unsettled transactions, net balances per member, and a simplified settle-up plan. `POST /api/groups/{id}/settle` marks a member's debt settled.
 7. **Player bios.** One scheduled bio per day (`player_bios.scheduled_date`), surfaced via `GET /api/bios/today`; a cron job (08:00) schedules the next unscheduled bio for today if none is set. `player_bios` rows are hand-entered today; see **Roster and fixture data sync** under Open questions for the planned automated source.
 8. **Notification preferences.** Each member controls 3-day check-in alerts, bench alerts, and the scope of daily bios (home team only / Summit only / league-wide) via `GET/PUT /api/preferences`.
-9. **Static rosters (Home Team / Visitors).** Squad and opposing-club dossiers render today from placeholder data baked into the frontend build; no roster/scouting-note endpoint exists yet.
+9. **Rosters (Home Team / Visitors).** `GET /api/roster` and `GET /api/opponents` (migration `0002_roster.sql`) back the squad and opposing-club dossiers, including per-player stats and scouting notes. The frontend does not call them yet — it still renders from placeholder data baked into the build (`web/build_src/data.py`).
 
 ### Known gaps between design and build
 
 - No push notification delivery (only the underlying "who needs a nudge" logic).
-- No roster/player-stats API backing Home Team and Visitors.
 - No integration with any external ticketing platform (SeatGeek, Ticketmaster, the club's own app) — "List Outside the Hearth" only tracks that a seat is listed; the admin or seat holder handles the actual transfer or sale themselves, outside SquadSeats.
-- Frontend and backend are not yet integrated — the PWA ships with mock data compiled in at build time (`web/build_src/data.py`); wiring it to the live API (build-time fetch for public data, runtime session-authenticated fetch for per-member data like balances and seat assignments) is the next major milestone.
+- Frontend and backend are not yet integrated — the PWA ships with mock data compiled in at build time (`web/build_src/data.py`), even though every screen but Landing and OIDC now has a live endpoint behind it (fixtures, ledger, listings, bios, roster, opponents). Wiring it to the live API (build-time fetch for public data, runtime session-authenticated fetch for per-member data like balances and seat assignments) is the next major milestone.
 
 ## Non-functional requirements
 
@@ -108,7 +107,7 @@ Tap targets ≥ 44px; toggles are `role="switch"` with `aria-checked`; the Heart
 - **OIDC sign-in** — which providers' JWKS endpoints, and token lifetime/refresh strategy, are undecided.
 - **Push delivery** — the cron logic exists; the send mechanism (web push? provider?) is not chosen.
 - **Weighted expense splits** — the formula for tier-weighted shares and bench-release credit is "still being decided" per `docs/backend.md`; `split_equally` is the only implementation today.
-- **Roster/scouting data** — Home Team and Visitors have no backing endpoint; real player stats, positions and scouting notes need a data source and schema.
+- **Roster/scouting data** — `GET /api/roster` and `GET /api/opponents` now back Home Team and Visitors with real tables (`roster_players`, `opponents`, `opponent_players`); the squad and dossiers seeded there are still the same invented names as the old frontend mock, not a real NWSL roster — see the data sync item below.
 - **Roster and fixture data sync (new requirement, added in review 2026-09-21).** Rather than hand-entering roster, fixture and bio data, pull it automatically: fixtures/schedule from the NWSL site (e.g. [Denver Summit's schedule page](https://www.nwslsoccer.com/teams/cbfcacbef5bc4a278442c00926ac9ebc/denver-summit/schedule)) and player headshots from Wikipedia — public data only, nothing copyrighted. Proposed shape: a scheduled job (a Worker cron or a GitHub Actions workflow running daily or weekly) that fetches both sources, diffs against `fixtures` and `player_bios`, and updates rows that have drifted out of sync. Not yet designed: exact scrape targets/selectors, how to attribute/cache Wikipedia images without copyright issues, and where the job runs (Worker cron vs. GitHub Actions).
 - **Joining a syndicate (invite codes and membership management)** — there is no API route at all for a member to join an existing syndicate, or for an admin to add, remove, or promote one; `group_members` is written to only once, for the creator, when `POST /api/groups` runs. "Find your syndicate" implies an invite-code mechanism, but its generation and redemption, plus general membership management, are both unbuilt.
 

@@ -15,7 +15,9 @@ holds the root-relative path to each one, falling back to
 | --- | --- |
 | `wrangler.jsonc` | Worker config: D1, KV, cron triggers |
 | `migrations/0001_initial.sql` | The D1 schema |
-| `seed/dev_seed.sql` | Four members, two fixtures, a part-paid ledger |
+| `migrations/0002_roster.sql` | Home-team squad and opponent dossiers |
+| `migrations/0003_national_team.sql` | National-team caps history for squad players |
+| `seed/dev_seed.sql` | Four members, two fixtures, a part-paid ledger, the squad and opponent dossiers |
 | `src/entry.py` | `on_fetch` route table, `on_scheduled` cron jobs |
 | `src/router.py` | Path matching (`/api/groups/{group_id}/fixtures`) |
 | `src/handlers.py` | One function per endpoint |
@@ -61,6 +63,8 @@ curl -H 'X-Dev-User: usr_ada' http://localhost:8787/api/groups
 | POST | `/api/groups/{id}/expenses` | Record an expense and split it |
 | POST | `/api/groups/{id}/settle` | Mark the debts with one member settled |
 | GET | `/api/bios/today` | The player bio scheduled for today |
+| GET | `/api/roster` | The home squad, club-wide (not per-syndicate) |
+| GET | `/api/opponents` | Visiting-club dossiers, each with its own scouting roster |
 | GET/PUT | `/api/preferences` | Notification preferences |
 
 ## Data model
@@ -73,6 +77,20 @@ A resale listing is not a table of its own. It is a seat allocation whose
 `status` is `resale_listed` with a `resale_price_cents`; a seat offered back to
 the syndicate for free sits at `on_bench`. `/api/groups/{id}/listings` reads
 both.
+
+`roster_players` and `opponents`/`opponent_players` (migration `0002`) are
+club-wide reference data, not scoped to a `group` — every syndicate reads the
+same squad and opponent dossiers. Per-player stats and per-opponent quick
+stats are free-form `[label, value]` pairs stored as JSON text (`stats_json`,
+`quick_stats_json`), since which stats matter varies by position; handlers
+decode them before returning.
+
+`national_team_appearances` (migration `0003`) is one row per national-team
+stint for a `roster_players` row -- a player can have represented more than
+one country, or the same one more than once, over a career. `year_end IS
+NULL` marks a stint still active. `GET /api/roster` nests each player's full
+history under `national_team_history` and also surfaces a convenience
+`current_national_team` (the country of their open stint, or `null`).
 
 An expense split writes one `transactions` row per member who owes a share,
 all sharing a `split_id` so the split can be shown or reversed as one unit. The

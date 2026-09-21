@@ -21,7 +21,11 @@ install_runtime_stubs()
 
 import entry  # noqa: E402
 
-SCHEMA = os.path.join(ROOT, "migrations", "0001_initial.sql")
+SCHEMA = [
+    os.path.join(ROOT, "migrations", "0001_initial.sql"),
+    os.path.join(ROOT, "migrations", "0002_roster.sql"),
+    os.path.join(ROOT, "migrations", "0003_national_team.sql"),
+]
 SEED = os.path.join(ROOT, "seed", "dev_seed.sql")
 
 
@@ -499,6 +503,54 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 400)
         self.assertIn("daily_bio_scope", payload["error"])
+
+    # --- roster and opponents -----------------------------------------------
+
+    def test_roster_is_ordered_with_parsed_stats(self):
+        status, payload = call(self.env, "GET", "/api/roster")
+        self.assertEqual(status, 200)
+        players = payload["players"]
+        self.assertEqual(len(players), 10)
+        self.assertEqual(players[0]["name"], "Rowan Vasquez")
+        self.assertEqual(players[0]["stats"], [["Clean sheets", "7"], ["Saves", "54"], ["Starts", "19"]])
+        self.assertNotIn("stats_json", players[0])
+
+    def test_roster_requires_sign_in(self):
+        status, payload = call(self.env, "GET", "/api/roster", user=None)
+        self.assertEqual(status, 401)
+
+    def test_roster_carries_national_team_history(self):
+        status, payload = call(self.env, "GET", "/api/roster")
+        self.assertEqual(status, 200)
+        players = {p["id"]: p for p in payload["players"]}
+
+        # Tess Aldridge: still capped for the USWNT.
+        tess = players["p7"]
+        self.assertEqual(tess["current_national_team"], "USWNT")
+        self.assertEqual(len(tess["national_team_history"]), 1)
+        self.assertIsNone(tess["national_team_history"][0]["year_end"])
+
+        # Sloane Beckett: past Canada caps, not currently on a national team.
+        sloane = players["p6"]
+        self.assertIsNone(sloane["current_national_team"])
+        self.assertEqual(sloane["national_team_history"][0]["year_end"], 2022)
+
+        # Rowan Vasquez: never capped.
+        rowan = players["p1"]
+        self.assertIsNone(rowan["current_national_team"])
+        self.assertEqual(rowan["national_team_history"], [])
+
+    def test_opponents_nest_their_players(self):
+        status, payload = call(self.env, "GET", "/api/opponents")
+        self.assertEqual(status, 200)
+        opponents = payload["opponents"]
+        self.assertEqual(len(opponents), 3)
+        portland = opponents[0]
+        self.assertEqual(portland["club"], "Portland Thorns")
+        self.assertEqual(portland["quick_stats"], [["Goals for", "31"], ["Goals against", "19"], ["Away wins", "5"]])
+        self.assertEqual([p["name"] for p in portland["players"]], ["Marisol Vega", "Elin Sandberg", "Dara Whitfield"])
+        self.assertIs(portland["players"][0]["is_danger"], True)
+        self.assertIs(portland["players"][1]["is_danger"], False)
 
 
 class ScheduledTests(unittest.TestCase):

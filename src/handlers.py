@@ -4,6 +4,8 @@ Every handler takes ``(request, env, params)`` and returns a Response.
 ``params`` holds the path parameters the router pulled out of the URL.
 """
 
+import json
+
 from auth import current_user, require_admin, require_membership
 from db import batch, execute, new_id, query, query_one
 from responses import ApiError, json_response, read_json, require, require_int
@@ -486,6 +488,60 @@ async def bio_of_the_day(request, env, params):
     if bio is None:
         raise ApiError(404, "No player bio is scheduled yet")
     return json_response({"bio": bio})
+
+
+# --- roster and opponents ---------------------------------------------------
+
+
+async def list_roster(request, env, params):
+    """The home squad, for the Home Team screen. Club-wide, not per-syndicate."""
+    await current_user(request, env)
+    players = await query(
+        env,
+        "SELECT * FROM roster_players ORDER BY sort_order, jersey_number",
+    )
+    caps = await query(
+        env,
+        """
+        SELECT * FROM national_team_appearances
+        ORDER BY player_id, year_start
+        """,
+    )
+    caps_by_player = {}
+    for cap in caps:
+        caps_by_player.setdefault(cap["player_id"], []).append(cap)
+
+    for player in players:
+        player["stats"] = json.loads(player.pop("stats_json"))
+        history = caps_by_player.get(player["id"], [])
+        player["national_team_history"] = history
+        current = next((cap for cap in history if cap["year_end"] is None), None)
+        player["current_national_team"] = current["country"] if current else None
+    return json_response({"players": players})
+
+
+async def list_opponents(request, env, params):
+    """Visiting-club dossiers, for the Visitors screen."""
+    await current_user(request, env)
+    opponents = await query(
+        env, "SELECT * FROM opponents ORDER BY sort_order"
+    )
+    players = await query(
+        env,
+        "SELECT * FROM opponent_players ORDER BY sort_order, jersey_number",
+    )
+    by_opponent = {}
+    for player in players:
+        by_opponent.setdefault(player["opponent_id"], []).append(player)
+
+    for opponent in opponents:
+        opponent["quick_stats"] = json.loads(opponent.pop("quick_stats_json"))
+        players_for_opponent = by_opponent.get(opponent["id"], [])
+        for player in players_for_opponent:
+            # SQLite/D1 hands BOOLEAN columns back as 0/1, not JSON booleans.
+            player["is_danger"] = bool(player["is_danger"])
+        opponent["players"] = players_for_opponent
+    return json_response({"opponents": opponents})
 
 
 # --- preferences -----------------------------------------------------------
