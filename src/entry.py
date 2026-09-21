@@ -1,7 +1,7 @@
 """Cloudflare Worker entry point for Summit Hearth & Bench.
 
-`on_fetch` serves the JSON API; `on_scheduled` runs the two daily crons
-declared in wrangler.jsonc.
+`on_fetch` serves the JSON API; `on_scheduled` runs the crons declared in
+wrangler.jsonc: two daily jobs and the weekly roster/fixture/headshot sync.
 """
 
 from js import URL
@@ -10,6 +10,7 @@ import handlers
 from db import execute, query, query_one
 from responses import ApiError, error_response, no_content
 from router import Router
+from sync import run_sync
 
 router = Router()
 
@@ -90,6 +91,9 @@ async def on_scheduled(event, env, ctx):
         await _rotate_daily_bio(env)
     elif cron == "0 10 * * *":
         await _send_checkin_reminders(env)
+    elif cron == "0 5 * * 1":
+        summary = await run_sync(env)
+        print("Roster/fixture/headshot sync: {}".format(summary))
     else:
         print("No job registered for cron " + str(cron))
 
