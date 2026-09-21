@@ -48,7 +48,7 @@ A seat holder who can't attend a fixture has three ways to give up their seat, a
 
 1. **Release to the Bench** — posts a note to the circle with an explicit cost choice: *get paid back* at face value, or *on the house* at no cost. Status becomes `on_bench`.
 2. **Send to Guest** — a direct gift to a named guest (`guest_name`); nobody's ledger balance moves. Status becomes `gifted`.
-3. **List Outside the Hearth** — flags the seat for an external exchange (SeatGeek/Ticketmaster) with a `resale_price_cents`. Status becomes `resale_listed`.
+3. **List Outside the Hearth** — flags the seat as listed on an external exchange (SeatGeek/Ticketmaster) with a `resale_price_cents`. Status becomes `resale_listed`. This is a tracking flag only: SquadSeats has no API integration with any ticketing platform (SeatGeek, Ticketmaster, the club's own app, etc.) — the admin or seat holder must actually transfer or sell the ticket on that platform themselves, outside the app.
 
 ### Expense splitting
 
@@ -71,6 +71,7 @@ An expense (`POST /api/groups/{id}/expenses`) writes one `transactions` row per 
 - No push notification delivery (only the underlying "who needs a nudge" logic).
 - No weighted expense splitting by fixture tier, and no credit for releasing a seat to the bench.
 - No roster/player-stats API backing Home Team and Visitors.
+- No integration with any external ticketing platform (SeatGeek, Ticketmaster, the club's own app) — "List Outside the Hearth" only tracks that a seat is listed; the admin or seat holder handles the actual transfer or sale themselves, outside SquadSeats.
 - Frontend and backend are not yet integrated — the PWA ships with mock data compiled in at build time (`web/build_src/data.py`); wiring it to the live API (build-time fetch for public data, runtime session-authenticated fetch for per-member data like balances and seat assignments) is the next major milestone.
 
 ## Non-functional requirements
