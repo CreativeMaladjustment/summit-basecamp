@@ -40,10 +40,15 @@ def _seat_line(fixture, seat, lg, label_style, mute_style, name):
 def seat_pair(fixture, seat, lg=False, on_dark=False):
     """The hero's roster display.
 
-    A seat held by you is pre-rendered in both states a Call a Sub
-    submission can reach: held (current) and released (generic "on the
-    bench" — the note itself is dynamic and lives in the bench-note card
-    instead, so the hero doesn't need three separate release-path variants).
+    A seat held by you is pre-rendered in every state a Call a Sub
+    submission can reach: held (current), plus one released variant per
+    outcome — released to the bench, gifted, or listed outside — so the
+    hero's wording actually matches what happened rather than collapsing
+    every outcome into a generic "on the bench". The outer key (held vs.
+    vacated) stays shared with the Pitch avatar strip and action row, which
+    only care whether the seat is still held; the outcome-specific text is
+    a nested toggle on its own `{key}:reason` key so those simpler widgets
+    aren't forced to grow three states of their own.
     Any other seat shows its current, non-interactive status only.
     """
     label_style = {"color": "#fff"} if on_dark else {}
@@ -51,10 +56,20 @@ def seat_pair(fixture, seat, lg=False, on_dark=False):
 
     if seat["holder"] == ME:
         key = seat_key(fixture["id"], seat["number"])
+        reason_key = f'{key}:reason'
+        vacated_seat = {**seat, "holder": None}
         held = h("span", {"data-seat": key, "data-state": "held"},
                  _seat_line(fixture, seat, lg, label_style, mute_style, MEMBERS[ME]["name"]))
-        released = h("span", {"data-seat": key, "data-state": "released", "hidden": True},
-                      _seat_line(fixture, {**seat, "holder": None}, lg, label_style, mute_style, "On the bench"))
+        reasons = h(
+            "span", None,
+            h("span", {"data-seat": reason_key, "data-state": "released"},
+              _seat_line(fixture, vacated_seat, lg, label_style, mute_style, "On the bench")),
+            h("span", {"data-seat": reason_key, "data-state": "gifted", "hidden": True},
+              _seat_line(fixture, vacated_seat, lg, label_style, mute_style, "Sent to a guest")),
+            h("span", {"data-seat": reason_key, "data-state": "listed", "hidden": True},
+              _seat_line(fixture, vacated_seat, lg, label_style, mute_style, "Listed outside")),
+        )
+        released = h("span", {"data-seat": key, "data-state": "released", "hidden": True}, reasons)
         return h("span", None, held, released)
 
     name = (

@@ -51,6 +51,12 @@ function showTab(tab) {
   for (const chip of document.querySelectorAll('[data-role="tab"]')) {
     chip.setAttribute('aria-selected', String(chip.dataset.value === tab));
   }
+  // The season selector only affects the Hearth ledger — Matchday, Pitch and
+  // Bench are pre-rendered for the current season only — so show it only
+  // where it actually does something, rather than implying it switches the
+  // whole app.
+  const seasonRow = document.getElementById('season-row');
+  if (seasonRow) seasonRow.hidden = tab !== 'hearth';
   window.scrollTo(0, 0);
   persist();
 }
@@ -130,8 +136,11 @@ function claimSeat(key, handOffId) {
 // or 'listed' (an external exchange) — only 'released' also reveals the
 // seat's claimable Bench card, keyed separately (see seats.py/bench.py) so
 // gifting or listing a seat never makes it wrongly appear open to claim.
+// The hero's wording picks the matching `${key}:reason` variant (seats.py)
+// instead of always saying "On the bench".
 function releaseSeat(key, outcome) {
   setSeatState(key, 'released');
+  setSeatState(`${key}:reason`, outcome);
   if (outcome === 'released') setSeatState(`${key}:listing`, 'open');
   if (!state.releasedSeats.includes(key)) state.releasedSeats.push(key);
   refreshBenchCount();

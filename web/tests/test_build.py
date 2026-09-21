@@ -168,26 +168,31 @@ class FullPageIntegrity(unittest.TestCase):
                 self.assertIn(f'id="{target_id}"', self.page)
 
     def test_seat_pairs_have_exactly_one_visible_variant(self):
-        """Every [data-seat] toggle pair should show exactly one non-hidden
-        state — never zero (invisible seat) or both. A seat's key
+        """Every [data-seat] toggle group should show exactly one non-hidden
+        state — never zero (invisible seat) or more than one. A seat's key
         intentionally repeats across independent widgets (Matchday's hero,
         the Pitch avatar strip, the Pitch action row, ...) so that src/app.js
-        can flip all of them at once; each occurrence renders its own
-        two-state pair, so this checks every consecutive pair rather than
-        summing hidden across all of a key's occurrences on the page."""
+        can flip all of them at once, and a group's own state set can vary
+        in size (a plain held/released pair vs. the hero's three-way
+        released/gifted/listed reason) — so this infers each group's size
+        from its own distinct states and checks every consecutive group of
+        that size, rather than assuming pairs or summing hidden globally."""
         seat_keys = set(re.findall(r'data-seat="([^"]+)"', self.page))
         for key in seat_keys:
             with self.subTest(seat=key):
-                blocks = re.findall(
-                    rf'<span data-seat="{re.escape(key)}" data-state="[a-z]+"( hidden)?>', self.page,
+                entries = re.findall(
+                    rf'<span data-seat="{re.escape(key)}" data-state="([a-z]+)"( hidden)?>', self.page,
                 )
-                if not blocks:
+                if not entries:
                     continue
-                self.assertEqual(len(blocks) % 2, 0, (key, blocks))
-                for i in range(0, len(blocks), 2):
-                    pair = blocks[i:i + 2]
-                    hidden_count = sum(1 for b in pair if b)
-                    self.assertEqual(hidden_count, 1, (key, i, blocks))
+                distinct_states = sorted({state for state, _ in entries})
+                group_size = len(distinct_states)
+                self.assertEqual(len(entries) % group_size, 0, (key, entries))
+                for i in range(0, len(entries), group_size):
+                    group = entries[i:i + group_size]
+                    self.assertEqual(sorted(state for state, _ in group), distinct_states, (key, i, entries))
+                    hidden_count = sum(1 for _, hidden in group if hidden)
+                    self.assertEqual(hidden_count, group_size - 1, (key, i, entries))
 
 
 if __name__ == "__main__":

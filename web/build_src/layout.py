@@ -68,8 +68,13 @@ def header(open_seats_count):
            f'{s["name"]} — {s["holds"]}') for s in SYNDICATES],
     )
 
+    # Only the Hearth ledger is pre-rendered per-season (Matchday/Pitch/Bench
+    # show the current season's fixtures only), so this only does anything
+    # there — src/app.js hides it outside Hearth rather than implying a
+    # global season switch. Matchday is the default tab, so start hidden.
     season_row = h(
-        "div", {"cls": "scroll-row", "style": {"marginTop": "8px"}, "role": "tablist", "aria-label": "Season"},
+        "div", {"id": "season-row", "cls": "scroll-row", "style": {"marginTop": "8px"}, "hidden": True,
+                 "role": "tablist", "aria-label": "Season"},
         [h("button", {"cls": "chip", "type": "button", "role": "tab",
                       "aria-selected": "true" if y["current"] else "false",
                       "data-role": "season", "data-value": str(y["year"])}, y["label"]) for y in SEASONS],
