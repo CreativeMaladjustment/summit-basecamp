@@ -58,14 +58,17 @@ def header(open_seats_count):
     # members only, so picking another syndicate here has nothing to switch
     # to yet — disable rather than leave a control that silently does
     # nothing. Multi-syndicate rendering is a build_src change, not
-    # something src/app.js can fake at runtime.
+    # something src/app.js can fake at runtime. Only SYNDICATES[0] gets an
+    # option, not the rest of SYNDICATES -- those are placeholder data for a
+    # switcher that doesn't work yet, not real syndicates this member
+    # belongs to, and listing them here would show them as if they were.
+    syn = SYNDICATES[0]
     switcher = h(
         "select", {"id": "syn-switch", "cls": "select",
                    "style": {"maxWidth": "100%", "fontWeight": "600", "minHeight": "40px"},
                    "data-role": "syndicate-switch", "disabled": True,
                    "title": "Switching syndicates is coming soon"},
-        [h("option", {"value": s["id"], "selected": s["id"] == SYNDICATES[0]["id"]},
-           f'{s["name"]} — {s["holds"]}') for s in SYNDICATES],
+        h("option", {"value": syn["id"], "selected": True}, f'{syn["name"]} — {syn["holds"]}'),
     )
 
     # Only the 14ers ledger is pre-rendered per-season (Matchday/Pitch/Bench
