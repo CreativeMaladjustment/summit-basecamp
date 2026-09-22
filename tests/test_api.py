@@ -31,6 +31,7 @@ SCHEMA = [
     os.path.join(ROOT, "migrations", "0006_opponent_sync.sql"),
     os.path.join(ROOT, "migrations", "0007_fixture_source_ref_unique.sql"),
     os.path.join(ROOT, "migrations", "0008_group_invite_codes.sql"),
+    os.path.join(ROOT, "migrations", "0009_user_contact_info.sql"),
 ]
 SEED = os.path.join(ROOT, "seed", "dev_seed.sql")
 
@@ -111,6 +112,50 @@ class ApiTests(unittest.TestCase):
     def test_sign_in_is_not_implemented_yet(self):
         status, _ = call(self.env, "POST", "/api/auth/session", user=None, body={})
         self.assertEqual(status, 501)
+
+    # --- profile ------------------------------------------------------------
+
+    def test_a_member_can_update_their_own_profile(self):
+        status, payload = call(
+            self.env,
+            "PATCH",
+            "/api/me",
+            body={"name": "Ada Okafor", "phone": "(303) 555-0142", "contact_email": "ada@family.example"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["user"]["name"], "Ada Okafor")
+        self.assertEqual(payload["user"]["phone"], "(303) 555-0142")
+        self.assertEqual(payload["user"]["contact_email"], "ada@family.example")
+
+        status, payload = call(self.env, "GET", "/api/me")
+        self.assertEqual(payload["user"]["name"], "Ada Okafor")
+
+    def test_updating_the_profile_accepts_a_partial_body(self):
+        status, payload = call(self.env, "PATCH", "/api/me", body={"phone": "(303) 555-0199"})
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["user"]["phone"], "(303) 555-0199")
+        self.assertEqual(payload["user"]["name"], "Ada")  # unchanged (see seed/dev_seed.sql)
+
+    def test_phone_and_contact_email_can_be_cleared(self):
+        call(self.env, "PATCH", "/api/me", body={"phone": "(303) 555-0142"})
+        status, payload = call(self.env, "PATCH", "/api/me", body={"phone": ""})
+        self.assertEqual(status, 200)
+        self.assertIsNone(payload["user"]["phone"])
+
+    def test_updating_the_profile_rejects_an_empty_name(self):
+        status, payload = call(self.env, "PATCH", "/api/me", body={"name": "   "})
+        self.assertEqual(status, 400)
+        self.assertIn("name", payload["error"])
+
+    def test_updating_the_profile_with_nothing_to_update_is_400(self):
+        status, payload = call(self.env, "PATCH", "/api/me", body={})
+        self.assertEqual(status, 400)
+        self.assertIn("Nothing to update", payload["error"])
+
+    def test_updating_the_profile_rejects_a_non_string_phone(self):
+        status, payload = call(self.env, "PATCH", "/api/me", body={"phone": 5551234})
+        self.assertEqual(status, 400)
+        self.assertIn("phone", payload["error"])
 
     # --- syndicates, fixtures and seats -----------------------------------
 

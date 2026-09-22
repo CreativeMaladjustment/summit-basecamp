@@ -19,6 +19,7 @@ router = Router()
 router.add("GET", "/api/health", handlers.health)
 router.add("POST", "/api/auth/session", handlers.begin_session)
 router.add("GET", "/api/me", handlers.get_me)
+router.add("PATCH", "/api/me", handlers.update_me)
 
 router.add("GET", "/api/groups", handlers.list_groups)
 router.add("POST", "/api/groups", handlers.create_group)

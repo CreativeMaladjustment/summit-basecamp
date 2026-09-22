@@ -61,6 +61,50 @@ async def get_me(request, env, params):
     return json_response({"user": user, "preferences": prefs})
 
 
+async def update_me(request, env, params):
+    """Edit the caller's own display name, phone or fallback contact email
+    -- the Settings screen's "Group & profile" card.
+
+    `phone`/`contact_email` are deliberately separate columns from the
+    sign-in `email` (see migration 0009): a member may want a different
+    number or address reachable for critical ticket transfers than the one
+    their Google or Apple account uses. `name` doubles as what every other
+    member sees in a member list, so unlike phone/contact_email it can be
+    edited but never cleared to empty.
+    """
+    user = await current_user(request, env)
+    body = await read_json(request)
+
+    editable_fields = ("name", "phone", "contact_email")
+    if not any(field in body for field in editable_fields):
+        raise ApiError(400, "Nothing to update")
+
+    updates = {}
+    if "name" in body:
+        name = body["name"]
+        if not isinstance(name, str) or not name.strip():
+            raise ApiError(400, "name must not be empty")
+        updates["name"] = name.strip()
+    for field in ("phone", "contact_email"):
+        if field in body:
+            value = body[field]
+            if value is not None and not isinstance(value, str):
+                raise ApiError(400, f"{field} must be a string or null")
+            # A blank or whitespace-only string clears the field, same as
+            # sending null explicitly, rather than storing empty text.
+            updates[field] = value.strip() if value and value.strip() else None
+
+    set_clause = ", ".join(f"{field} = ?" for field in updates)
+    await execute(
+        env,
+        f"UPDATE users SET {set_clause} WHERE id = ?",
+        *updates.values(),
+        user["id"],
+    )
+    updated = await query_one(env, "SELECT * FROM users WHERE id = ?", user["id"])
+    return json_response({"user": updated})
+
+
 # --- syndicates ------------------------------------------------------------
 
 

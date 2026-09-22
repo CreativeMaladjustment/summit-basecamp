@@ -40,7 +40,7 @@ Sign-in is Google or Apple OIDC (`users.auth_provider`); there is no email/passw
 | The 14ers | Package cost, weighted tier split, simplified debts, Settle Up, season history | `GET /api/groups/{id}/ledger`, `POST /api/groups/{id}/expenses`, `POST /api/groups/{id}/settle` |
 | Home Team | Full squad roster with position filters, stats and scouting notes (a "Peak Tifo" visual grid) | `GET /api/roster` (frontend still renders from `web/build_src/data.py`, not wired yet) |
 | Visitors | The visiting club's dressing room: real club/date/venue facts, the most recent meeting's result, real rosters where synced | `GET /api/opponents` (frontend still renders from `web/build_src/data.py`, not wired yet) |
-| Campfire Settings | Push permissions, matchday alerts, Summit Touchline notes mix, profile | `GET/PUT /api/preferences` |
+| Campfire Settings | Push permissions, matchday alerts, Summit Touchline notes mix, profile | `GET/PUT /api/preferences`, `GET/PATCH /api/me` |
 
 ### Seat handoff ("Call a Sub")
 
