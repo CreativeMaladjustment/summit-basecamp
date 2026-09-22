@@ -23,10 +23,11 @@ name: Sync roster
 #     value to the Worker as SYNC_ADMIN_TOKEN on every deploy -- nothing
 #     else to do, just set the GitHub secret and let the next deploy run.
 #   - variable CF_API_BASE_URL: the deployed Worker's base URL, e.g.
-#     https://summit-hearth-api.<your-subdomain>.workers.dev (the exact
-#     value is on the Worker's Overview page in the Cloudflare dashboard),
-#     or a custom domain if one is routed to it. Include the https://
-#     scheme; no trailing slash.
+#     summit-hearth-api.<your-subdomain>.workers.dev (the exact value is on
+#     the Worker's Overview page in the Cloudflare dashboard), or a custom
+#     domain if one is routed to it. The https:// scheme is optional -- the
+#     "POST /api/admin/sync" step below fills it in when missing -- but
+#     either way, no trailing slash.
 
 on:
   workflow_run:
@@ -75,8 +76,18 @@ jobs:
           SYNC_ADMIN_TOKEN: ${{ secrets.CF_SYNC_ADMIN_TOKEN }}
         run: |
           set -euo pipefail
+          # CF_API_BASE_URL may or may not include a scheme -- curl defaults
+          # to plain http:// without one, which a *.workers.dev host (or
+          # any Worker with "Always Use HTTPS" on) rejects or redirects
+          # rather than serving, so this fills in https:// when missing
+          # instead of relying on it always being set with a scheme.
+          case "$API_BASE_URL" in
+            http://*|https://*) base="$API_BASE_URL" ;;
+            *) base="https://$API_BASE_URL" ;;
+          esac
+
           status="$(curl -sS -o /tmp/sync-response.json -w '%{http_code}' \
-            -X POST "${API_BASE_URL%/}/api/admin/sync" \
+            -X POST "${base%/}/api/admin/sync" \
             -H "Authorization: Bearer ${SYNC_ADMIN_TOKEN}")"
 
           {
