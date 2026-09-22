@@ -44,8 +44,8 @@ flight is never cancelled.
   `CF_PAGES_DIRECTORY` repository variable.
 
 The one thing it cannot work out is the **Pages project name**, which defaults
-to `summit-hearth-and-bench`. If the Pages project is called something else,
-set a `CF_PAGES_PROJECT` repository variable.
+to `summit-basecamp`. If the Pages project is called something else, set a
+`CF_PAGES_PROJECT` repository variable.
 
 ## Migrations
 
@@ -53,3 +53,29 @@ set a `CF_PAGES_PROJECT` repository variable.
 the Worker deploys. That is a write to production data on every push to `main`
 that carries a new migration, so migrations should be written to be safe to
 apply ahead of the code that needs them.
+
+## Renaming the Worker or Pages project
+
+Neither can be renamed in place on Cloudflare -- the name is the identifier
+the URL is built from, so changing it (`wrangler.jsonc`'s `name`, or a new
+`CF_PAGES_PROJECT`) deploys a *new* Worker or Pages project at a *new*
+`*.workers.dev`/`*.pages.dev` hostname, leaving the old one behind, still
+serving whatever it last deployed, until it's explicitly deleted.
+
+After a rename lands:
+
+1. This repo's own deploy creates the new Worker automatically on its next
+   run (Workers don't need pre-creating); the new Pages project needs one
+   run of "Provision Cloudflare resources" (`resource: pages`) first, the
+   same way the original project was created.
+2. Update the `CF_API_BASE_URL` repository variable
+   (`.github/workflows/sync-roster.yml`) to the new Worker's hostname --
+   forgetting this doesn't error, it just keeps calling the old Worker.
+   Check `CF_PAGES_PROJECT` too, if one is set.
+3. Confirm the new Worker (`GET /api/health`) and the new Pages site both
+   work.
+4. Only then, run `.github/workflows/decommission-cloudflare.yml` by hand
+   (once per resource) to delete the old Worker and old Pages project. It
+   requires typing the exact old resource name as confirmation and never
+   runs on its own -- there is no automatic cleanup, on purpose, since
+   deleting either is unrecoverable.

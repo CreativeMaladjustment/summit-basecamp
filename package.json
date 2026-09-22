@@ -1,5 +1,5 @@
 {
-  "name": "summit-hearth-api",
+  "name": "summit-basecamp-api",
   "private": true,
   "description": "Cloudflare Workers backend for Summit Basecamp (SquadSeats)",
   "scripts": {

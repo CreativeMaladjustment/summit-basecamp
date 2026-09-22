@@ -23,11 +23,15 @@ name: Sync roster
 #     value to the Worker as SYNC_ADMIN_TOKEN on every deploy -- nothing
 #     else to do, just set the GitHub secret and let the next deploy run.
 #   - variable CF_API_BASE_URL: the deployed Worker's base URL, e.g.
-#     summit-hearth-api.<your-subdomain>.workers.dev (the exact value is on
+#     summit-basecamp-api.<your-subdomain>.workers.dev (the exact value is on
 #     the Worker's Overview page in the Cloudflare dashboard), or a custom
 #     domain if one is routed to it. The https:// scheme is optional -- the
 #     "POST /api/admin/sync" step below fills it in when missing -- but
-#     either way, no trailing slash.
+#     either way, no trailing slash. Update this after the Worker is renamed
+#     (see wrangler.jsonc) -- the old hostname stays reachable, serving
+#     whatever it last deployed, until the old Worker is deleted via
+#     .github/workflows/decommission-cloudflare.yml, so a stale value here
+#     fails silently rather than loudly.
 
 on:
   workflow_run:
