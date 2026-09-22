@@ -530,7 +530,7 @@ async def list_opponents(request, env, params):
     )
     players = await query(
         env,
-        "SELECT * FROM opponent_players ORDER BY sort_order, jersey_number",
+        "SELECT * FROM opponent_players WHERE active ORDER BY sort_order, jersey_number",
     )
     by_opponent = {}
     for player in players:

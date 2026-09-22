@@ -49,12 +49,16 @@ def photo_slot(player_id, size):
     )
 
 
-def bio_links(name, wiki_query=None):
+def bio_links(name, club_url, club_label="Club bio", wiki_query=None):
+    """club_url is always the caller's own real, verified link -- there is
+    no per-team default here. It used to be hardcoded to Denver Summit's
+    roster page regardless of which team's player card called this, which
+    sent an opponent's "Club bio" link to Denver Summit's own roster."""
     q = wiki_query or name
     return h(
         "div", {"style": {"display": "flex", "gap": "10px", "marginTop": "6px", "flexWrap": "wrap"}},
-        h("a", {"href": "https://www.denversummitfc.com/roster", "target": "_blank",
-                "rel": "noopener noreferrer", "style": {"fontSize": "13px"}}, "Club bio ↗"),
+        h("a", {"href": club_url, "target": "_blank",
+                "rel": "noopener noreferrer", "style": {"fontSize": "13px"}}, f"{club_label} ↗"),
         h("a", {"href": f"https://en.wikipedia.org/w/index.php?search={_urlenc(q)}",
                 "target": "_blank", "rel": "noopener noreferrer", "style": {"fontSize": "13px"}},
           "Wikipedia ↗"),

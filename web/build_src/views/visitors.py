@@ -56,38 +56,33 @@ def room():
 
 
 def dossier(op):
-    stats = h(
-        "div", {"style": {"display": "flex", "gap": "8px", "marginTop": "14px", "flexWrap": "wrap"}},
-        [h("div", {"cls": "card card--sunk", "style": {"padding": "8px 12px", "borderRadius": "10px", "flex": "1 1 96px"}},
-           h("p", {"cls": "eyebrow"}, k),
-           h("p", {"style": {"margin": "2px 0 0", "fontFamily": "var(--font-display)", "fontWeight": "700", "fontSize": "18px"}}, v))
-         for k, v in op["quick_stats"]],
+    empty_players_note = h(
+        "p", {"style": {"margin": "0", "fontSize": "14px", "color": "var(--ink-mute)"}},
+        "Full team sheet not published here yet — see the ",
+        h("a", {"href": op["match_url"], "target": "_blank", "rel": "noopener noreferrer"},
+          "latest meeting"),
+        " for who played.",
     )
     return h(
         "section", {"style": {"marginTop": "14px"}},
         h("article", {"cls": "card"},
-          h("div", {"style": {"display": "flex", "justifyContent": "space-between", "gap": "10px", "flexWrap": "wrap"}},
-            h("div", None,
-              h("h2", {"style": {"fontSize": "19px", "fontWeight": "800"}}, op["club"]),
-              h("p", {"style": {"margin": "4px 0 0", "fontFamily": "var(--font-mono)", "fontSize": "12px", "color": "var(--ink-mute)"}},
-                f'HOME {op["home_date"]} · AWAY {op["away_date"]}'),
-              h("p", {"style": {"margin": "2px 0 0", "fontSize": "13px", "color": "var(--ink-mute)"}},
-                f'Away leg at {op["away_venue"]} — outside the package.')),
-            h("div", None,
-              h("p", {"cls": "eyebrow"}, "Form"),
-              h("p", {"style": {"margin": "4px 0 0", "fontFamily": "var(--font-mono)", "fontWeight": "500", "letterSpacing": ".18em"}}, op["form"]))),
-          stats,
+          h("div", None,
+            h("h2", {"style": {"fontSize": "19px", "fontWeight": "800"}}, op["club"]),
+            h("p", {"style": {"margin": "4px 0 0", "fontFamily": "var(--font-mono)", "fontSize": "12px", "color": "var(--ink-mute)"}},
+              f'HOME {op["home_date"]} · AWAY {op["away_date"]}'),
+            h("p", {"style": {"margin": "2px 0 0", "fontSize": "13px", "color": "var(--ink-mute)"}},
+              f'Away leg at {op["away_venue"]} — outside the package.')),
           h("div", {"style": {"marginTop": "14px", "padding": "12px 14px", "borderRadius": "10px",
                                "background": "rgba(200,75,49,.1)", "borderLeft": "3px solid var(--summit-sandstone)"}},
-            h("p", {"cls": "eyebrow", "style": {"color": "var(--summit-sandstone)"}}, "Halftime read"),
-            h("p", {"style": {"margin": "5px 0 0", "fontSize": "14px", "color": "var(--ink-soft)"}}, op["halftime"])),
-          h("p", {"style": {"margin": "14px 0 0", "fontSize": "14px"}}, h("strong", None, "Shape: "), op["shape"])),
+            h("p", {"cls": "eyebrow", "style": {"color": "var(--summit-sandstone)"}}, "This season"),
+            h("p", {"style": {"margin": "5px 0 0", "fontSize": "14px", "color": "var(--ink-soft)"}}, op["recent_result"]))),
         h("p", {"cls": "eyebrow", "style": {"margin": "16px 0 8px"}}, "Dressing room occupants"),
-        h("div", {"cls": "grid-auto", "style": {"alignItems": "start"}}, [peg_card(p) for p in op["players"]]),
+        h("div", {"cls": "grid-auto", "style": {"alignItems": "start"}}, [peg_card(p, op) for p in op["players"]])
+        if op["players"] else empty_players_note,
     )
 
 
-def peg_card(p):
+def peg_card(p, op):
     tilt = -0.35 if p["num"] % 2 else 0.3
     return h(
         "article", {"cls": "card", "style": {"transform": f"rotate({tilt}deg)"}},
@@ -101,7 +96,7 @@ def peg_card(p):
                        "style": {"fontFamily": "var(--font-display)", "fontWeight": "700", "fontSize": "15px"}}, p["name"]),
               badge("DANGER", "ember") if p["danger"] else None),
             h("p", {"style": {"margin": "3px 0 0", "fontFamily": "var(--font-mono)", "fontSize": "12px", "color": "var(--ink-mute)"}}, p["pos"]),
-            bio_links(p["name"]))),
+            bio_links(p["name"], op["match_url"], club_label="Latest meeting"))),
         h("button", {"cls": "btn btn--ghost btn--block", "type": "button", "style": {"marginTop": "10px"},
                      "aria-expanded": "false", "data-role": "expand", "data-target": f'peg-detail-{p["id"]}',
                      "data-label-open": "Pull it off the hook", "data-label-close": "Back on the hook"},
