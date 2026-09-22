@@ -401,18 +401,6 @@ function main() {
         showStage('app');
         showTab('matchday');
         return;
-      case 'create-syndicate': {
-        const nameInput = document.getElementById('new-syn-name');
-        const name = nameInput.value.trim();
-        if (!name) { nameInput.focus(); return; }
-        state.syndicateName = name;
-        paintSyndicateName();
-        persist();
-        closeSheet();
-        showStage('app');
-        showTab('matchday');
-        return;
-      }
       case 'sign-out':
         localStorage.removeItem(KEY);
         location.reload();
@@ -600,6 +588,23 @@ function main() {
   });
 
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
+
+  // A real <form>, not a bare button, so pressing Enter in the name field
+  // submits it and the browser's own required-field validation applies --
+  // preventDefault stops the GET-navigation a plain form submit would
+  // otherwise try, since there's nothing server-side here to receive it.
+  document.getElementById('new-syndicate-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const nameInput = document.getElementById('new-syn-name');
+    const name = nameInput.value.trim();
+    if (!name) { nameInput.focus(); return; }
+    state.syndicateName = name;
+    paintSyndicateName();
+    persist();
+    closeSheet();
+    showStage('app');
+    showTab('matchday');
+  });
 }
 
 document.addEventListener('DOMContentLoaded', main);
