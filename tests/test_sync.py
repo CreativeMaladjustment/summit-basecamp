@@ -21,7 +21,13 @@ from fake_workers import FakeFetchResponse, install_runtime_stubs, make_env  # n
 install_runtime_stubs()
 
 import sync  # noqa: E402
-from sync_sources import NWSL_ROSTER_URL, NWSL_SCHEDULE_URL, SyncSourceError, WIKIPEDIA_API  # noqa: E402
+from sync_sources import (  # noqa: E402
+    NWSL_ROSTER_URL,
+    NWSL_SCHEDULE_URL,
+    SyncSourceError,
+    WIKIPEDIA_API,
+    fetch_nwsl_roster,
+)
 import js  # noqa: E402
 
 SCHEMA = [
@@ -274,8 +280,6 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
         # must fail the whole fetch, not silently return a shorter roster --
         # _sync_roster would otherwise deactivate every real player missing
         # from that shorter list.
-        import sync_sources
-
         html = (
             "<html><body><table><tbody>"
             + _roster_row("aaaa1111aaaa1111aaaa1111aaaa1111", "Ada", "Okafor", "ada-okafor", 9, "Forward")
@@ -286,7 +290,7 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
         js.fetch.install({NWSL_ROSTER_URL: FakeFetchResponse(html)})
 
         with self.assertRaises(SyncSourceError):
-            await sync_sources.fetch_nwsl_roster(self.env)
+            await fetch_nwsl_roster(self.env)
 
     async def test_roster_sync_picks_up_a_name_change(self):
         await self._seed_player(name="Ada Okafor")
