@@ -2,13 +2,12 @@
 -- D1 database, unlike seed/dev_seed.sql (which also creates fictional dev
 -- users, syndicates, fixtures and tickets that have no place in prod).
 --
--- This is a stopgap: the weekly sync cron (src/sync.py, wired to run every
--- Monday 5am UTC in wrangler.jsonc) is meant to keep roster_players current
--- automatically, but its scraper (src/sync_sources.py fetch_nwsl_roster)
--- expects a JSON-LD ItemList on the NWSL roster page that the live page
--- does not have -- it fails with SyncSourceError rather than writing
--- anything. Until that scraper is fixed to read the page's actual roster
--- table, this file is the only way real names reach production.
+-- Not required for normal operation: .github/workflows/sync-roster.yml
+-- keeps roster_players current automatically (POST /api/admin/sync, on
+-- every deploy to main and on its own weekly schedule -- see
+-- docs/backend.md). This file is only for an optional one-off bootstrap --
+-- e.g. seeding a brand-new database before that workflow's first run, or
+-- restoring the roster by hand if it's ever needed.
 --
 -- Run with:
 --   npx wrangler d1 execute summit-hearth-db --remote --file=seed/roster_seed.sql

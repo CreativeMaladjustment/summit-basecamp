@@ -59,11 +59,18 @@ jobs:
     steps:
       - name: Check required configuration
         shell: bash
+        # Read through env rather than interpolating ${{ }} directly into
+        # the script: a secret spliced straight into shell text can contain
+        # characters (quotes, $(), a newline) that alter the script itself,
+        # not just its value.
+        env:
+          API_BASE_URL: ${{ vars.CF_API_BASE_URL }}
+          SYNC_ADMIN_TOKEN: ${{ secrets.CF_SYNC_ADMIN_TOKEN }}
         run: |
           set -euo pipefail
           missing=()
-          [ -z "${{ vars.CF_API_BASE_URL }}" ] && missing+=("the CF_API_BASE_URL repository/environment variable")
-          [ -z "${{ secrets.CF_SYNC_ADMIN_TOKEN }}" ] && missing+=("the CF_SYNC_ADMIN_TOKEN secret")
+          [ -z "$API_BASE_URL" ] && missing+=("the CF_API_BASE_URL repository/environment variable")
+          [ -z "$SYNC_ADMIN_TOKEN" ] && missing+=("the CF_SYNC_ADMIN_TOKEN secret")
           if [ "${#missing[@]}" -gt 0 ]; then
             printf '::error::Cannot trigger the roster sync -- missing: %s\n' "$(IFS=', '; echo "${missing[*]}")"
             exit 1

@@ -154,20 +154,29 @@ async def fetch_nwsl_roster(env=None):
 
     The roster tab renders no JSON-LD (verified against a real snapshot of
     the page on 2026-09-21) -- it's a server-rendered Next.js table, one
-    <tr> per player -- so this scrapes that table directly. Falls back to
-    raising SyncSourceError when no player rows are found at all, so a
-    markup change degrades to a skipped roster sync rather than corrupting
-    existing rows.
+    <tr> per player -- so this scrapes that table directly. Raises
+    SyncSourceError rather than returning a partial roster when any row's
+    name can't be parsed, not just when none can: _sync_roster deactivates
+    every existing player not present in what this returns, so a markup
+    change that still finds every row marker (data-player-id) but breaks
+    just the name spans would otherwise look like a clean, smaller roster
+    and deactivate everyone missing from it, rather than skip the run as a
+    fetch failure normally would.
     """
     html = await _get_text(NWSL_ROSTER_URL)
     starts = [match.start() for match in _ROSTER_ROW_START_RE.finditer(html)]
+    if not starts:
+        raise SyncSourceError("no roster rows found on the roster page")
+
     players = []
+    unparsed = 0
     for index, start in enumerate(starts):
         end = starts[index + 1] if index + 1 < len(starts) else len(html)
         row = html[start:end]
 
         name_match = _ROSTER_NAME_RE.search(row)
         if name_match is None:
+            unparsed += 1
             continue
         name = "{} {}".format(name_match.group(1).strip(), name_match.group(2).strip())
 
@@ -184,8 +193,12 @@ async def fetch_nwsl_roster(env=None):
                 "position": _POSITION_CODES.get(position_raw.lower(), position_raw),
             }
         )
-    if not players:
-        raise SyncSourceError("no roster rows found on the roster page")
+    if unparsed:
+        raise SyncSourceError(
+            "parsed {} of {} roster rows -- roster page markup may have changed".format(
+                len(players), len(starts)
+            )
+        )
     return players
 
 
