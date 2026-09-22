@@ -74,8 +74,12 @@ After a rename lands:
    Check `CF_PAGES_PROJECT` too, if one is set.
 3. Confirm the new Worker (`GET /api/health`) and the new Pages site both
    work.
-4. Only then, run `.github/workflows/decommission-cloudflare.yml` by hand
-   (once per resource) to delete the old Worker and old Pages project. It
-   requires typing the exact old resource name as confirmation and never
-   runs on its own -- there is no automatic cleanup, on purpose, since
-   deleting either is unrecoverable.
+4. Only then, run `decommission-cloudflare.yml` by hand (once per resource)
+   to delete the old Worker and old Pages project. It requires typing the
+   exact old resource name as confirmation and never runs on its own --
+   there is no automatic cleanup, on purpose, since deleting either is
+   unrecoverable. Archived at `.github/workflows/archive/` between uses --
+   GitHub Actions only discovers workflows directly under
+   `.github/workflows/`, so move it back up one level before running it,
+   then back down to `archive/` again afterwards if you'd rather it not
+   show up in the Actions tab day to day.
