@@ -14,7 +14,7 @@ The product solves three problems syndicates otherwise track by spreadsheet and 
 
 ## Current state
 
-The repository (`creativemaladjustment/summit-hearth-and-bench`) has both halves scaffolded and merged to `main`: a Cloudflare Python Worker API over D1 (`src/`, `migrations/0001_initial.sql`, `docs/backend.md`) and a pre-rendered Python-generated PWA (`web/`, `web/README.md`). The two are not yet wired together — the frontend currently renders from mock data baked in at build time (`web/build_src/data.py`); replacing that with live calls to the Worker API is the largest piece of work still ahead. This document describes requirements grounded in what is actually built, not the original design brief's full aspirational scope.
+The repository (`creativemaladjustment/summit-basecamp`) has both halves scaffolded and merged to `main`: a Cloudflare Python Worker API over D1 (`src/`, `migrations/0001_initial.sql`, `docs/backend.md`) and a pre-rendered Python-generated PWA (`web/`, `web/README.md`). The two are not yet wired together — the frontend currently renders from mock data baked in at build time (`web/build_src/data.py`); replacing that with live calls to the Worker API is the largest piece of work still ahead. This document describes requirements grounded in what is actually built, not the original design brief's full aspirational scope.
 
 ## User roles
 
