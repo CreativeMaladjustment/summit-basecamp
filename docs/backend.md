@@ -26,6 +26,7 @@ profile picture is nowhere near KV's 25 MiB per-value limit.
 | `migrations/0003_national_team.sql` | National-team caps history for squad players |
 | `migrations/0006_opponent_sync.sql` | Sync tracking columns (`source_ref`, `source_slug`, `match_url`) for opponents/opponent_players, and nullable `opponent_players.jersey_number` |
 | `migrations/0007_fixture_source_ref_unique.sql` | Partial unique index on `fixtures(group_id, source_ref)`, guarding `_create_fixture_from_sync` against two overlapping sync runs both creating the same fixture |
+| `migrations/0008_group_invite_codes.sql` | `groups.invite_code`, unique, backing `POST /api/groups/join` |
 | `seed/dev_seed.sql` | Four members, two fixtures, a part-paid ledger, the squad and all 15 opponent dossiers -- dev only, not safe to run against production (see below); DELETE-then-INSERT throughout, so rerunning it against the same database is a full reset |
 | `seed/roster_seed.sql` | Just the real home roster, safe to run against production (`wrangler d1 execute ... --remote --file=seed/roster_seed.sql`) as a one-off; the sync job is the ongoing way this table gets updated |
 | `seed/opponents_seed.sql` | All 15 real opponent dossiers, safe to run against production -- **not** just an optional bootstrap like the other two seeds; the sync job never creates an opponent row from nothing, only updates ones this file (or an equivalent) already put there. Idempotent (`INSERT ... ON CONFLICT DO UPDATE`, never a DELETE), so rerunning it -- to add a club or fix a typo -- never wipes sync-owned `opponent_players` rows or an admin's hand-edited `form`/`shape_note` |
@@ -66,9 +67,11 @@ curl -H 'X-Dev-User: usr_ada' http://localhost:8787/api/groups
 | POST | `/api/auth/session` | Exchange an OIDC token for a session (not implemented) |
 | GET | `/api/me` | The signed-in member and their notification preferences |
 | GET | `/api/groups` | Syndicates the caller belongs to |
-| POST | `/api/groups` | Start a syndicate; the creator becomes its admin |
+| POST | `/api/groups` | Start a syndicate; the creator becomes its admin, and gets a fresh invite code |
+| POST | `/api/groups/join` | Join an existing syndicate by its invite code |
 | GET | `/api/groups/{id}` | One syndicate and its members |
-| PATCH | `/api/groups/{id}` | Rename a syndicate or set its total package price (admin) |
+| PATCH | `/api/groups/{id}` | Rename a syndicate, set its total package price, or grow/shrink its total seat count (admin) |
+| POST | `/api/groups/{id}/invite-code/rotate` | Replace a syndicate's invite code (admin) |
 | GET | `/api/groups/{id}/members` | Members only |
 | PATCH | `/api/groups/{id}/members/{user_id}` | Change a member's default seat number (self, or admin for anyone); change a role (admin only) |
 | GET | `/api/groups/{id}/fixtures` | Fixtures in kickoff order |
@@ -109,6 +112,48 @@ their syndicate regardless of who holds it, edit any member's default seat
 number, and promote or demote a member's role -- the override that lets an
 admin fix a seat nobody else involved can (e.g. one whose holder has left the
 syndicate).
+
+An admin can also grow or shrink the syndicate itself, via `total_seats` on
+`PATCH /api/groups/{id}`. Growing it retrofits every existing fixture with
+one new `on_bench` `seat_allocation` per new seat number, the same shape
+`create_fixture` seeds a brand-new fixture with. Shrinking is refused with
+409 if it would silently destroy anything: a member's `default_seat_number`
+still pointing above the new total, or a `seat_allocation` above it that
+isn't just `on_bench` (confirmed, gifted, or resale-listed) -- both have to
+be freed by hand first, the same way the collision guards elsewhere in this
+file work.
+
+## Invite codes
+
+Every syndicate has an `invite_code` (`groups.invite_code`, backfilled for
+pre-existing rows by migration `0008`, generated fresh for a new one in
+`create_group`) -- 16 hex characters from `secrets` (`db.new_invite_code`),
+64 bits so it can't be brute-forced over the network (nothing else gates
+`POST /api/groups/join` -- no throttling, no expiry), distinct from the
+shorter, non-secret `new_id()` ids used elsewhere. `POST /api/groups/join`
+looks a code up (case-insensitively) and adds the caller as a plain `member`
+with no `default_seat_number`, the same starting point as anyone else added
+to a syndicate. Already a member: 409. Unknown code: 404.
+`POST /api/groups/{id}/invite-code/rotate` (admin-only) replaces a
+syndicate's code outright, so a leaked or no-longer-wanted one stops working
+without touching anyone already in.
+
+Deploys apply migrations before deploying the Worker (see "Renaming the
+Worker or Pages project" below, same ordering), so there is a narrow window
+where a previous Worker version -- built before `create_group` knew
+`invite_code` existed -- could still insert a group with none, if a deploy
+ever lands old code after this migration. `invite_code` has no `NOT NULL`
+for exactly that reason: a `NOT NULL` insert from that stale code would 500
+outright rather than merely leave the row without a code. Recovery is the
+same rotate call above, run once by that syndicate's admin -- not
+self-healing, but not stuck either. A `CREATE TRIGGER` in the migration
+itself would close the window automatically, but D1's remote migration
+runner has a real, currently-open bug misparsing multi-statement
+`BEGIN ... END` trigger bodies (`SQLITE_ERROR` / code 7500 --
+[cloudflare/workers-sdk#10998](https://github.com/cloudflare/workers-sdk/issues/10998),
+[#15690](https://github.com/cloudflare/workers-sdk/issues/15690)) even
+though the same SQL runs fine locally -- worth revisiting once that's fixed
+upstream, not worth risking a broken production migration for now.
 
 ## Profile pictures
 

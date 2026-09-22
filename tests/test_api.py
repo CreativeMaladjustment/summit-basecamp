@@ -30,6 +30,7 @@ SCHEMA = [
     os.path.join(ROOT, "migrations", "0005_roster_jersey_nullable.sql"),
     os.path.join(ROOT, "migrations", "0006_opponent_sync.sql"),
     os.path.join(ROOT, "migrations", "0007_fixture_source_ref_unique.sql"),
+    os.path.join(ROOT, "migrations", "0008_group_invite_codes.sql"),
 ]
 SEED = os.path.join(ROOT, "seed", "dev_seed.sql")
 
@@ -275,6 +276,154 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertEqual(payload["member"]["role"], "member")
+
+    # --- invite codes -------------------------------------------------------
+
+    def test_a_new_syndicate_gets_an_invite_code(self):
+        status, payload = call(
+            self.env,
+            "POST",
+            "/api/groups",
+            body={
+                "name": "Away Day Crew",
+                "season_year": 2027,
+                "total_seats": 2,
+                "package_cost_cents": 100000,
+            },
+        )
+        self.assertEqual(status, 201)
+        self.assertTrue(payload["group"]["invite_code"])
+
+    def test_joining_by_invite_code_adds_a_member(self):
+        asyncio.run(
+            self.env.DB.prepare(
+                "INSERT INTO users (id, email, name, auth_provider, auth_provider_id)"
+                " VALUES ('usr_out', 'out@example.com', 'Out', 'google', 'dev-out')"
+            ).run()
+        )
+        status, payload = call(
+            self.env,
+            "POST",
+            "/api/groups/join",
+            user="usr_out",
+            body={"invite_code": "summit01"},
+        )
+        self.assertEqual(status, 201)
+        self.assertEqual(payload["group"]["id"], "grp_summit")
+        joined = next(m for m in payload["members"] if m["id"] == "usr_out")
+        self.assertEqual(joined["role"], "member")
+        self.assertIsNone(joined["default_seat_number"])
+
+        status, payload = call(self.env, "GET", "/api/groups", user="usr_out")
+        self.assertEqual([g["id"] for g in payload["groups"]], ["grp_summit"])
+
+    def test_an_invalid_invite_code_is_404(self):
+        status, payload = call(
+            self.env, "POST", "/api/groups/join", body={"invite_code": "NOPE0000"}
+        )
+        self.assertEqual(status, 404)
+
+    def test_joining_a_syndicate_already_belonged_to_is_409(self):
+        status, _ = call(
+            self.env, "POST", "/api/groups/join", body={"invite_code": "SUMMIT01"}
+        )
+        self.assertEqual(status, 409)
+
+    def test_an_admin_can_rotate_the_invite_code(self):
+        status, payload = call(
+            self.env, "GET", "/api/groups/grp_summit"
+        )
+        original = payload["group"]["invite_code"]
+
+        status, payload = call(
+            self.env, "POST", "/api/groups/grp_summit/invite-code/rotate"
+        )
+        self.assertEqual(status, 200)
+        self.assertNotEqual(payload["group"]["invite_code"], original)
+
+        status, _ = call(
+            self.env, "POST", "/api/groups/join", user="usr_bo", body={"invite_code": original}
+        )
+        self.assertEqual(status, 404)
+
+    def test_a_non_admin_cannot_rotate_the_invite_code(self):
+        status, _ = call(
+            self.env, "POST", "/api/groups/grp_summit/invite-code/rotate", user="usr_bo"
+        )
+        self.assertEqual(status, 403)
+
+    # --- resizing a syndicate -------------------------------------------
+
+    def test_an_admin_can_grow_total_seats(self):
+        status, payload = call(
+            self.env, "PATCH", "/api/groups/grp_summit", body={"total_seats": 5}
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["group"]["total_seats"], 5)
+
+        status, payload = call(self.env, "GET", "/api/fixtures/fix_001/seats")
+        self.assertEqual(len(payload["seats"]), 5)
+        new_seat = next(s for s in payload["seats"] if s["seat_number"] == 5)
+        self.assertEqual(new_seat["status"], "on_bench")
+        self.assertIsNone(new_seat["assigned_user_id"])
+
+        status, payload = call(self.env, "GET", "/api/fixtures/fix_002/seats")
+        self.assertEqual(len(payload["seats"]), 5)
+
+    def test_shrinking_total_seats_is_blocked_by_an_occupied_seat(self):
+        # fix_001's seat 4 is resale_listed and fix_002's seat 4 is confirmed
+        # (see seed/dev_seed.sql) -- shrinking to 3 would destroy both. Clear
+        # usr_dev's default seat first so only this guard is under test.
+        call(
+            self.env,
+            "PATCH",
+            "/api/groups/grp_summit/members/usr_dev",
+            body={"default_seat_number": None},
+        )
+
+        status, _ = call(
+            self.env, "PATCH", "/api/groups/grp_summit", body={"total_seats": 3}
+        )
+        self.assertEqual(status, 409)
+
+        status, payload = call(self.env, "GET", "/api/groups/grp_summit")
+        self.assertEqual(payload["group"]["total_seats"], 4)
+
+    def test_shrinking_total_seats_is_blocked_by_a_members_default_seat(self):
+        # usr_dev's default_seat_number is 4 (see seed/dev_seed.sql). Free
+        # both seat-4 allocations first so only this guard is under test.
+        call(self.env, "PATCH", "/api/seats/seat_004", body={"status": "on_bench", "assigned_user_id": None})
+        call(self.env, "PATCH", "/api/seats/seat_008", body={"status": "on_bench", "assigned_user_id": None})
+
+        status, _ = call(self.env, "PATCH", "/api/groups/grp_summit", body={"total_seats": 3})
+        self.assertEqual(status, 409)
+
+    def test_shrinking_total_seats_removes_the_freed_bench_seats(self):
+        call(
+            self.env,
+            "PATCH",
+            "/api/groups/grp_summit/members/usr_dev",
+            body={"default_seat_number": None},
+        )
+        call(self.env, "PATCH", "/api/seats/seat_004", body={"status": "on_bench", "assigned_user_id": None})
+        call(self.env, "PATCH", "/api/seats/seat_008", body={"status": "on_bench", "assigned_user_id": None})
+
+        status, payload = call(
+            self.env, "PATCH", "/api/groups/grp_summit", body={"total_seats": 3}
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["group"]["total_seats"], 3)
+
+        status, payload = call(self.env, "GET", "/api/fixtures/fix_001/seats")
+        self.assertEqual(len(payload["seats"]), 3)
+        status, payload = call(self.env, "GET", "/api/fixtures/fix_002/seats")
+        self.assertEqual(len(payload["seats"]), 3)
+
+    def test_a_non_admin_cannot_change_total_seats(self):
+        status, _ = call(
+            self.env, "PATCH", "/api/groups/grp_summit", user="usr_bo", body={"total_seats": 5}
+        )
+        self.assertEqual(status, 403)
 
     def test_a_new_fixture_gets_a_seat_per_member(self):
         status, payload = call(

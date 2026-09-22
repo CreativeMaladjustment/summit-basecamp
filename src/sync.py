@@ -428,11 +428,16 @@ async def _create_fixture_from_sync(env, group, remote):
     between two separate calls could otherwise leave a fixture row with no
     seats at all forever, since a fixture already matched by source_ref is
     only ever updated after that, never re-created to backfill what's
-    missing. Each seat insert is itself an INSERT ... SELECT ... WHERE
-    EXISTS against this fixture_id, not a plain INSERT ... VALUES, so a
-    fixture insert IGNOREd by the race guard above still correctly creates
-    no seats even though every statement in the batch runs regardless of
-    what an earlier one in the same batch did.
+    missing. The seat insert is a single WITH RECURSIVE INSERT ... SELECT,
+    not one INSERT ... VALUES per seat_number built from group["total_seats"]:
+    that field is a snapshot the caller (_sync_fixtures) read before this
+    batch, and an admin resizing total_seats (handlers.update_group)
+    concurrently with a sync run could otherwise leave a synced fixture
+    seeded from the stale count. Bounding the recursive seat_numbers CTE by
+    a correlated subquery against groups.total_seats instead reads it live,
+    inside this same transaction. The final SELECT still runs WHERE EXISTS
+    against this fixture_id, so a fixture insert IGNOREd by the race guard
+    above still correctly creates no seats.
     """
     fixture_id = new_id("fix")
     writes = [
@@ -451,18 +456,23 @@ async def _create_fixture_from_sync(env, group, remote):
                 remote["venue"],
                 remote["source_ref"],
             ),
-        )
-    ]
-    for seat_number in range(1, int(group["total_seats"]) + 1):
-        writes.append(
-            (
-                """
-                INSERT INTO seat_allocations (id, fixture_id, seat_number, status)
-                SELECT ?, ?, ?, 'on_bench' WHERE EXISTS (SELECT 1 FROM fixtures WHERE id = ?)
-                """,
-                (new_id("seat"), fixture_id, seat_number, fixture_id),
+        ),
+        (
+            """
+            WITH RECURSIVE seat_numbers(n) AS (
+                SELECT 1
+                UNION ALL
+                SELECT n + 1 FROM seat_numbers
+                WHERE n < (SELECT total_seats FROM groups WHERE id = ?)
             )
-        )
+            INSERT INTO seat_allocations (id, fixture_id, seat_number, status)
+            SELECT 'seat_' || lower(hex(randomblob(8))), ?, seat_numbers.n, 'on_bench'
+            FROM seat_numbers
+            WHERE EXISTS (SELECT 1 FROM fixtures WHERE id = ?)
+            """,
+            (group["id"], fixture_id, fixture_id),
+        ),
+    ]
 
     results = await batch(env, writes)
     fixture_result = results[0] if results else None
