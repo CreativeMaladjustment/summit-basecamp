@@ -146,6 +146,21 @@ async def update_group(request, env, params):
     above the new total and isn't just sitting on_bench -- reconciling that
     silently (dropping a confirmed/gifted/resale_listed seat, or a member's
     default assignment) would destroy state the admin never asked to lose.
+
+    A resize is never just a read-then-write against a snapshot taken
+    moments earlier: the guards above, and an optimistic
+    "total_seats hasn't moved since I read it" check that applies either
+    way, are embedded directly in the write statements below and run in one
+    D1 batch (one atomic transaction) -- the same INSERT/DELETE ... WHERE
+    EXISTS pattern sync._create_fixture_from_sync uses to chain a later
+    statement's effect off an earlier one in the same batch. Without that,
+    a concurrent create_fixture could read the old total and seed a new
+    fixture with too few seats after this handler already took its
+    snapshot of which fixtures exist, or a seat could become occupied after
+    the shrink guards ran and still get deleted. _require_seats_shrinkable
+    below still runs first, as a pre-check -- purely so the common,
+    non-racing case gets a specific, helpful 409 rather than the generic
+    conflict one below; the embedded guards are what actually enforces it.
     """
     user = await current_user(request, env)
     group_id = params["group_id"]
@@ -171,54 +186,95 @@ async def update_group(request, env, params):
         else old_total_seats
     )
 
+    if total_seats == old_total_seats:
+        await execute(
+            env,
+            "UPDATE groups SET name = ?, package_cost_cents = ? WHERE id = ?",
+            name,
+            package_cost_cents,
+            group_id,
+        )
+        updated = await query_one(env, "SELECT * FROM groups WHERE id = ?", group_id)
+        return json_response({"group": updated})
+
+    if total_seats < old_total_seats:
+        await _require_seats_shrinkable(env, group_id, total_seats)
+
+    group_guard_sql = "id = ? AND total_seats = ?"
+    group_guard_params = [group_id, old_total_seats]
+    if total_seats < old_total_seats:
+        group_guard_sql += """
+              AND NOT EXISTS (
+                SELECT 1 FROM group_members gm
+                WHERE gm.group_id = groups.id AND gm.default_seat_number > ?
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM seat_allocations s
+                JOIN fixtures f ON f.id = s.fixture_id
+                WHERE f.group_id = groups.id AND s.seat_number > ? AND s.status != 'on_bench'
+              )
+        """
+        group_guard_params += [total_seats, total_seats]
+
     writes = [
         (
-            "UPDATE groups SET name = ?, package_cost_cents = ?, total_seats = ? WHERE id = ?",
-            (name, package_cost_cents, total_seats, group_id),
+            "UPDATE groups SET name = ?, package_cost_cents = ?, total_seats = ? WHERE "
+            + group_guard_sql,
+            tuple([name, package_cost_cents, total_seats, *group_guard_params]),
         )
     ]
     if total_seats > old_total_seats:
-        writes.extend(
-            await _new_bench_seats(env, group_id, old_total_seats, total_seats)
-        )
-    elif total_seats < old_total_seats:
-        await _require_seats_shrinkable(env, group_id, total_seats)
+        for seat_number in range(old_total_seats + 1, total_seats + 1):
+            writes.append(
+                (
+                    """
+                    INSERT INTO seat_allocations (id, fixture_id, seat_number, status)
+                    SELECT 'seat_' || lower(hex(randomblob(8))), f.id, ?, 'on_bench'
+                    FROM fixtures f
+                    WHERE f.group_id = ?
+                      AND EXISTS (SELECT 1 FROM groups g WHERE g.id = ? AND g.total_seats = ?)
+                      AND NOT EXISTS (
+                        SELECT 1 FROM seat_allocations s2
+                        WHERE s2.fixture_id = f.id AND s2.seat_number = ?
+                      )
+                    """,
+                    (seat_number, group_id, group_id, total_seats, seat_number),
+                )
+            )
+    else:
         writes.append(
             (
                 """
                 DELETE FROM seat_allocations
                 WHERE seat_number > ?
                   AND fixture_id IN (SELECT id FROM fixtures WHERE group_id = ?)
+                  AND EXISTS (SELECT 1 FROM groups g WHERE g.id = ? AND g.total_seats = ?)
                 """,
-                (total_seats, group_id),
+                (total_seats, group_id, group_id, total_seats),
             )
         )
 
-    await batch(env, writes)
+    results = await batch(env, writes)
+    if _rows_changed(results[0] if results else None) == 0:
+        raise ApiError(
+            409, "This syndicate changed since you last looked at it -- refresh and retry"
+        )
     updated = await query_one(env, "SELECT * FROM groups WHERE id = ?", group_id)
     return json_response({"group": updated})
 
 
-async def _new_bench_seats(env, group_id, old_total_seats, new_total_seats):
-    """Batch-writes seeding one on_bench seat_allocation, for each fixture
-    already in this syndicate, for every seat number the new total adds."""
-    fixtures = await query(env, "SELECT id FROM fixtures WHERE group_id = ?", group_id)
-    writes = []
-    for fixture in fixtures:
-        for seat_number in range(old_total_seats + 1, new_total_seats + 1):
-            writes.append(
-                (
-                    """
-                    INSERT INTO seat_allocations (id, fixture_id, seat_number, status)
-                    VALUES (?, ?, ?, 'on_bench')
-                    """,
-                    (new_id("seat"), fixture["id"], seat_number),
-                )
-            )
-    return writes
+def _rows_changed(batch_result):
+    """How many rows one statement in a batch() result actually changed --
+    same shape sync._create_fixture_from_sync reads to tell whether its own
+    guarded statement in the same batch took effect."""
+    meta = getattr(batch_result, "meta", None) if batch_result is not None else None
+    return (getattr(meta, "changes", 0) or 0) if meta is not None else 0
 
 
 async def _require_seats_shrinkable(env, group_id, new_total_seats):
+    """A fast, specific pre-check for the common (non-racing) case -- see
+    update_group's docstring for why the embedded guards in its own batch,
+    not this function, are what actually enforces it."""
     orphaned_default = await query_one(
         env,
         "SELECT 1 FROM group_members WHERE group_id = ? AND default_seat_number > ?",
@@ -267,21 +323,29 @@ async def join_group(request, env, params):
     if group is None:
         raise ApiError(404, "Invalid invite code")
 
-    already_a_member = await query_one(
+    # INSERT ... SELECT ... WHERE NOT EXISTS, not a membership check
+    # followed by a separate INSERT: two simultaneous redemptions by the
+    # same user could otherwise both pass the check, and the loser would
+    # hit group_members' primary key and surface as an uncaught 500 instead
+    # of the documented 409 -- same atomic-guard pattern as the seat/role
+    # collision guards in update_member.
+    changed = await execute(
         env,
-        "SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?",
+        """
+        INSERT INTO group_members (group_id, user_id, role)
+        SELECT ?, ?, 'member'
+        WHERE NOT EXISTS (
+            SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?
+        )
+        """,
+        group["id"],
+        user["id"],
         group["id"],
         user["id"],
     )
-    if already_a_member:
+    if changed == 0:
         raise ApiError(409, "You are already a member of this syndicate")
 
-    await execute(
-        env,
-        "INSERT INTO group_members (group_id, user_id, role) VALUES (?, ?, 'member')",
-        group["id"],
-        user["id"],
-    )
     return json_response(
         {"group": group, "members": await _members(env, group["id"])}, status=201
     )

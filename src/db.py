@@ -4,6 +4,7 @@ D1 hands results back as JS objects; these helpers convert them to plain
 Python dicts so handlers never touch JsProxy values directly.
 """
 
+import secrets
 import uuid
 
 
@@ -13,9 +14,14 @@ def new_id(prefix):
 
 
 def new_invite_code():
-    """A short code a person can actually read aloud and type, unlike the
-    longer, prefixed ids ``new_id`` makes -- e.g. ``4F91A2C8``."""
-    return uuid.uuid4().hex[:8].upper()
+    """A code a person can type to join a syndicate -- shorter than the
+    prefixed ids ``new_id`` makes, but still a bearer credential with
+    nothing else gating it (POST /api/groups/join has no throttling or
+    expiry), so it needs real entropy rather than just being short and
+    memorable. 16 hex characters from ``secrets`` (64 bits, cryptographically
+    random) makes guessing one by brute force over the network infeasible,
+    unlike a shorter code -- e.g. ``9F2C4E91A8D6B0C3``."""
+    return secrets.token_hex(8).upper()
 
 
 def _statement(env, sql, params):

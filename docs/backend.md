@@ -127,14 +127,33 @@ file work.
 
 Every syndicate has an `invite_code` (`groups.invite_code`, backfilled for
 pre-existing rows by migration `0008`, generated fresh for a new one in
-`create_group`) -- an 8-character, human-typeable code (`db.new_invite_code`),
-distinct from the longer `new_id()` ids nothing but code ever reads.
-`POST /api/groups/join` looks a code up (case-insensitively) and adds the
-caller as a plain `member` with no `default_seat_number`, the same starting
-point as anyone else added to a syndicate. Already a member: 409. Unknown
-code: 404. `POST /api/groups/{id}/invite-code/rotate` (admin-only) replaces a
+`create_group`) -- 16 hex characters from `secrets` (`db.new_invite_code`),
+64 bits so it can't be brute-forced over the network (nothing else gates
+`POST /api/groups/join` -- no throttling, no expiry), distinct from the
+shorter, non-secret `new_id()` ids used elsewhere. `POST /api/groups/join`
+looks a code up (case-insensitively) and adds the caller as a plain `member`
+with no `default_seat_number`, the same starting point as anyone else added
+to a syndicate. Already a member: 409. Unknown code: 404.
+`POST /api/groups/{id}/invite-code/rotate` (admin-only) replaces a
 syndicate's code outright, so a leaked or no-longer-wanted one stops working
 without touching anyone already in.
+
+Deploys apply migrations before deploying the Worker (see "Renaming the
+Worker or Pages project" below, same ordering), so there is a narrow window
+where a previous Worker version -- built before `create_group` knew
+`invite_code` existed -- could still insert a group with none, if a deploy
+ever lands old code after this migration. `invite_code` has no `NOT NULL`
+for exactly that reason: a `NOT NULL` insert from that stale code would 500
+outright rather than merely leave the row without a code. Recovery is the
+same rotate call above, run once by that syndicate's admin -- not
+self-healing, but not stuck either. A `CREATE TRIGGER` in the migration
+itself would close the window automatically, but D1's remote migration
+runner has a real, currently-open bug misparsing multi-statement
+`BEGIN ... END` trigger bodies (`SQLITE_ERROR` / code 7500 --
+[cloudflare/workers-sdk#10998](https://github.com/cloudflare/workers-sdk/issues/10998),
+[#15690](https://github.com/cloudflare/workers-sdk/issues/15690)) even
+though the same SQL runs fine locally -- worth revisiting once that's fixed
+upstream, not worth risking a broken production migration for now.
 
 ## Profile pictures
 
