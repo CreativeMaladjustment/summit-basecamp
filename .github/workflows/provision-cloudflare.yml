@@ -164,6 +164,10 @@ jobs:
           sed -i "s/REPLACE_WITH_D1_DATABASE_ID/$id/" wrangler.jsonc
           echo "created=true" >> "$GITHUB_OUTPUT"
 
+      # Renamed from summit-hearth-and-bench for the Summit Basecamp rebrand.
+      # A CF_PAGES_PROJECT repository variable set to the old name overrides
+      # this new default -- update or unset it, or this (and deploy.yml)
+      # keep targeting the old project.
       - name: Create Pages project
         id: pages
         if: inputs.resource == 'all' || inputs.resource == 'pages'
@@ -173,7 +177,7 @@ jobs:
           CF_PAGES_PROJECT: ${{ vars.CF_PAGES_PROJECT }}
         run: |
           set -euo pipefail
-          name="${CF_PAGES_PROJECT:-summit-hearth-and-bench}"
+          name="${CF_PAGES_PROJECT:-summit-basecamp}"
 
           if npx --no-install wrangler pages project list --json \
             | jq -e --arg name "$name" '.[] | select(.name == $name)' >/dev/null; then

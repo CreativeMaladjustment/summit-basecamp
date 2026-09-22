@@ -1,6 +1,16 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "summit-hearth-api",
+  // Renamed from summit-hearth-api for the Summit Basecamp rebrand. Cloudflare
+  // Workers can't be renamed in place -- this "name" is what wrangler deploy
+  // creates/targets, so changing it deploys a *new* Worker at a new
+  // *.workers.dev hostname rather than relabeling the old one. The old
+  // summit-hearth-api Worker keeps existing (and keeps serving whatever it
+  // last deployed) until .github/workflows/decommission-cloudflare.yml is
+  // run against it by hand, after CF_API_BASE_URL (the GitHub variable
+  // .github/workflows/sync-roster.yml reads) has been updated to this new
+  // hostname -- deleting the old one first, or before that variable is
+  // updated, breaks the next scheduled sync silently.
+  "name": "summit-basecamp-api",
   "main": "src/entry.py",
   "compatibility_date": "2024-12-05",
   "compatibility_flags": ["python_workers"],

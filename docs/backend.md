@@ -1,6 +1,6 @@
 # Backend
 
-The API is a single Cloudflare Python Worker (`summit-hearth-api`) over D1 for
+The API is a single Cloudflare Python Worker (`summit-basecamp-api`) over D1 for
 data, and KV for both sessions and member-uploaded profile pictures. The PWA is
 deployed separately on Cloudflare Pages and talks to this Worker cross-origin.
 
