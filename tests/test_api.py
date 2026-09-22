@@ -28,6 +28,7 @@ SCHEMA = [
     os.path.join(ROOT, "migrations", "0004_sync_metadata.sql"),
     os.path.join(ROOT, "migrations", "0005_roster_jersey_nullable.sql"),
     os.path.join(ROOT, "migrations", "0006_opponent_sync.sql"),
+    os.path.join(ROOT, "migrations", "0007_fixture_source_ref_unique.sql"),
 ]
 SEED = os.path.join(ROOT, "seed", "dev_seed.sql")
 

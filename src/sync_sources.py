@@ -121,35 +121,46 @@ _SCHEDULE_TEAM_BLOCK_RE = re.compile(
 
 
 def _parse_kickoff(date_text, time_text, year):
-    # date_text is "Saturday, Oct 17" -- the weekday prefix before the comma
-    # is thrown away since strptime has no use for it once %Y is supplied
-    # separately (the page never puts weekday and month/day in one parseable
-    # token together with a year).
+    """Returns (kickoff_at ISO string, time_known). May raise ValueError --
+    callers must catch it (fetch_nwsl_schedule does, converting it to the
+    same partial-parse accounting every other unparseable row gets).
+
+    date_text is "Saturday, Oct 17" -- the weekday prefix before the comma
+    is thrown away since strptime has no use for it once %Y is supplied
+    separately (the page never puts weekday and month/day in one parseable
+    token together with a year).
+    """
     _, _, month_day = date_text.partition(", ")
     if time_text:
         parsed = datetime.datetime.strptime(
             "{} {} {}".format(month_day, year, time_text), "%b %d %Y %I:%M %p"
         )
-    else:
-        # A finished match's row carries no kickoff time widget, only its
-        # date -- close enough for matching an existing fixture by date
-        # (see sync._within_window), and finished matches are never used to
-        # create a new one (see sync._sync_fixtures).
-        parsed = datetime.datetime.strptime("{} {}".format(month_day, year), "%b %d %Y")
-    return parsed.isoformat()
+        return parsed.isoformat(), True
+    # A finished match's row carries no kickoff time widget, only its date.
+    # time_known=False tells _sync_fixtures not to let this midnight
+    # stand-in overwrite a real kickoff time already on an existing row --
+    # only used for matching (see sync._within_window), never to create a
+    # new fixture (a finished match never does, see sync._sync_fixtures).
+    parsed = datetime.datetime.strptime("{} {}".format(month_day, year), "%b %d %Y")
+    return parsed.isoformat(), False
 
 
 async def fetch_nwsl_schedule(env=None):
     """Denver Summit's full-season match list, from the team schedule page.
 
     Returns a list of dicts: source_ref, opponent, opponent_team_id,
-    kickoff_at (ISO 8601), venue, is_home. Includes finished matches as well
-    as upcoming ones -- filtering to what's still ahead is sync.py's job,
-    not this module's. opponent_team_id is nwslsoccer.com's own stable id
-    for the opposing club, a byproduct of reading data-team-id off the row
-    -- useful for matching an opponent by id instead of by name (see
-    sync._sync_opponents), where the old claim that opponents have no
-    stable identifier no longer holds.
+    kickoff_at (ISO 8601), kickoff_time_known, venue, is_home. Includes
+    finished matches as well as upcoming ones -- filtering to what's still
+    ahead is sync.py's job, not this module's. opponent_team_id is
+    nwslsoccer.com's own stable id for the opposing club, a byproduct of
+    reading data-team-id off the row -- useful for matching an opponent by
+    id instead of by name (see sync._sync_opponents), where the old claim
+    that opponents have no stable identifier no longer holds.
+    kickoff_time_known is False for a finished match, whose row carries no
+    kickoff time widget -- kickoff_at still gets a full ISO datetime
+    (midnight) so every row has one to sort/compare, but sync.py must not
+    let that midnight stand-in overwrite a real kickoff time already on
+    file.
 
     The schedule tab renders no JSON-LD (verified against a real snapshot
     of the page on 2026-09-21) -- it's a plain match-list widget, one <tr>-
@@ -191,11 +202,22 @@ async def fetch_nwsl_schedule(env=None):
         by_side = {side: name for _, side, name in teams}
         by_team_id = {team_id: side for team_id, side, _ in teams}
 
-        if url_match is None or venue_match is None or set(by_side) != {"team-h", "team-a"}:
+        # DENVER_SUMMIT_TEAM_ID must be one of the two team ids: without
+        # that check, a row where team-id parsing came up short (id missing
+        # or garbled) would fall through .get(...) == "team-h" as False and
+        # get treated as an away fixture against whichever team actually
+        # was found -- fabricating a fixture rather than being caught as a
+        # parse failure like every other broken row here is.
+        if (
+            url_match is None
+            or venue_match is None
+            or set(by_side) != {"team-h", "team-a"}
+            or DENVER_SUMMIT_TEAM_ID not in by_team_id
+        ):
             unparsed += 1
             continue
 
-        is_home = by_team_id.get(DENVER_SUMMIT_TEAM_ID) == "team-h"
+        is_home = by_team_id[DENVER_SUMMIT_TEAM_ID] == "team-h"
         opponent_side = "team-a" if is_home else "team-h"
         opponent = by_side[opponent_side]
         opponent_team_id = next(
@@ -203,14 +225,27 @@ async def fetch_nwsl_schedule(env=None):
         )
         time_match = _SCHEDULE_TIME_RE.search(row)
 
+        try:
+            kickoff_at, kickoff_time_known = _parse_kickoff(
+                current_date, time_match.group(1) if time_match else None, season_year
+            )
+        except ValueError:
+            # A date/time format change breaks this row's parse the same
+            # way a missing team id or venue does -- caught here rather
+            # than left to escape as a bare ValueError, which _safe() (see
+            # sync.py) only catches SyncSourceError from; an uncaught
+            # ValueError would crash run_sync entirely instead of just
+            # skipping this one job.
+            unparsed += 1
+            continue
+
         fixtures.append(
             {
                 "source_ref": url_match.group(1),
                 "opponent": opponent,
                 "opponent_team_id": opponent_team_id,
-                "kickoff_at": _parse_kickoff(
-                    current_date, time_match.group(1) if time_match else None, season_year
-                ),
+                "kickoff_at": kickoff_at,
+                "kickoff_time_known": kickoff_time_known,
                 "venue": venue_match.group(1),
                 "is_home": is_home,
             }

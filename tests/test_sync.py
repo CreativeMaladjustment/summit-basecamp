@@ -40,6 +40,7 @@ SCHEMA = [
     os.path.join(ROOT, "migrations", "0004_sync_metadata.sql"),
     os.path.join(ROOT, "migrations", "0005_roster_jersey_nullable.sql"),
     os.path.join(ROOT, "migrations", "0006_opponent_sync.sql"),
+    os.path.join(ROOT, "migrations", "0007_fixture_source_ref_unique.sql"),
 ]
 
 def _season_header(year=2026):
@@ -416,17 +417,18 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
         rows = await sync_query(self.env, "SELECT venue FROM fixtures WHERE id = 'fix_1'")
         self.assertEqual(rows[0]["venue"], "Admin-entered Venue")
 
-    async def _seed_group(self, group_id="grp_1", total_seats=2):
+    async def _seed_group(self, group_id="grp_1", total_seats=2, season_year=2026):
         await sync_exec(
             self.env,
-            "INSERT INTO groups (id, name, season_year, total_seats, package_cost_cents) VALUES (?, 'Test Syndicate', 2026, ?, 100000)",
+            "INSERT INTO groups (id, name, season_year, total_seats, package_cost_cents) VALUES (?, 'Test Syndicate', ?, ?, 100000)",
             group_id,
+            season_year,
             total_seats,
         )
 
     async def test_fixture_sync_creates_a_fixture_for_an_upcoming_home_match(self):
-        await self._seed_group(total_seats=2)
         future = datetime.date.today() + datetime.timedelta(days=30)
+        await self._seed_group(total_seats=2, season_year=future.year)
         html = "<html><body>" + _season_header(future.year) + _schedule_row(
             "1111aaaa1111aaaa1111aaaa1111aaaa", future.strftime("%A, %b ") + str(future.day),
             "Angel City", "bbbb2222bbbb2222bbbb2222bbbb2222", "Centennial Stadium",
@@ -453,8 +455,8 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(seat["assigned_user_id"])
 
     async def test_fixture_sync_does_not_create_for_an_away_match(self):
-        await self._seed_group()
         future = datetime.date.today() + datetime.timedelta(days=30)
+        await self._seed_group(season_year=future.year)
         html = "<html><body>" + _season_header(future.year) + _schedule_row(
             "1111aaaa1111aaaa1111aaaa1111aaaa", future.strftime("%A, %b ") + str(future.day),
             "Chicago Stars", "bbbb2222bbbb2222bbbb2222bbbb2222", "Some Away Venue",
@@ -469,8 +471,8 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fixtures[0]["n"], 0)
 
     async def test_fixture_sync_does_not_create_for_a_match_already_played(self):
-        await self._seed_group()
         past = datetime.date.today() - datetime.timedelta(days=30)
+        await self._seed_group(season_year=past.year)
         html = "<html><body>" + _season_header(past.year) + _schedule_row(
             "1111aaaa1111aaaa1111aaaa1111aaaa", past.strftime("%A, %b ") + str(past.day),
             "Angel City", "bbbb2222bbbb2222bbbb2222bbbb2222", "Centennial Stadium",
@@ -483,6 +485,118 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["created"], 0)
         fixtures = await sync_query(self.env, "SELECT COUNT(*) AS n FROM fixtures")
         self.assertEqual(fixtures[0]["n"], 0)
+
+    async def test_fixture_sync_does_not_create_for_a_match_that_kicked_off_earlier_today(self):
+        # A date-only comparison would still call today's match "upcoming"
+        # hours after it kicked off; 12:01 AM is past "now" for essentially
+        # any real time of day this test runs.
+        today = datetime.date.today()
+        await self._seed_group(season_year=today.year)
+        html = "<html><body>" + _season_header(today.year) + _schedule_row(
+            "1111aaaa1111aaaa1111aaaa1111aaaa", today.strftime("%A, %b ") + str(today.day),
+            "Angel City", "bbbb2222bbbb2222bbbb2222bbbb2222", "Centennial Stadium",
+            "denver-summit-vs-angel-city", is_home=True, time_text="12:01 AM",
+        ) + "</body></html>"
+        js.fetch.install({NWSL_SCHEDULE_URL: FakeFetchResponse(html)})
+
+        result = await sync._sync_fixtures(self.env)
+
+        self.assertEqual(result["created"], 0)
+
+    async def test_fixture_sync_does_not_create_for_a_group_in_a_different_season(self):
+        future = datetime.date.today() + datetime.timedelta(days=30)
+        # Group's season is one year off the remote match's -- a 2026
+        # schedule must never populate a 2025 or 2027 syndicate's fixtures.
+        await self._seed_group(season_year=future.year + 1)
+        html = "<html><body>" + _season_header(future.year) + _schedule_row(
+            "1111aaaa1111aaaa1111aaaa1111aaaa", future.strftime("%A, %b ") + str(future.day),
+            "Angel City", "bbbb2222bbbb2222bbbb2222bbbb2222", "Centennial Stadium",
+            "denver-summit-vs-angel-city", is_home=True, time_text="7:00 PM",
+        ) + "</body></html>"
+        js.fetch.install({NWSL_SCHEDULE_URL: FakeFetchResponse(html)})
+
+        result = await sync._sync_fixtures(self.env)
+
+        self.assertEqual(result["created"], 0)
+        fixtures = await sync_query(self.env, "SELECT COUNT(*) AS n FROM fixtures")
+        self.assertEqual(fixtures[0]["n"], 0)
+
+    async def test_fixture_sync_is_idempotent_against_a_racing_duplicate_create(self):
+        # Simulates two overlapping sync runs both finding the same group
+        # missing the same match: calling the creation step twice for the
+        # same (group, remote) must not produce two fixtures or two sets of
+        # seats -- migrations/0007_fixture_source_ref_unique.sql is what
+        # makes the second call a no-op instead of a duplicate insert.
+        future = datetime.date.today() + datetime.timedelta(days=30)
+        await self._seed_group(total_seats=2, season_year=future.year)
+        group = (await sync_query(self.env, "SELECT id, total_seats FROM groups"))[0]
+        remote = {
+            "source_ref": "https://www.nwslsoccer.com/match/aaaa/denver-summit-vs-angel-city",
+            "opponent": "Angel City",
+            "kickoff_at": "{}-01-01T19:00:00".format(future.year),
+            "venue": "Centennial Stadium",
+        }
+
+        first = await sync._create_fixture_from_sync(self.env, group, remote)
+        second = await sync._create_fixture_from_sync(self.env, group, remote)
+
+        self.assertTrue(first)
+        self.assertFalse(second)
+        fixtures = await sync_query(self.env, "SELECT COUNT(*) AS n FROM fixtures")
+        self.assertEqual(fixtures[0]["n"], 1)
+        seats = await sync_query(self.env, "SELECT COUNT(*) AS n FROM seat_allocations")
+        self.assertEqual(seats[0]["n"], 2)
+
+    async def test_fixture_sync_preserves_a_known_kickoff_time_when_remote_time_is_unknown(self):
+        # A match that has since finished carries no kickoff time widget
+        # (see fetch_nwsl_schedule); its synthesized midnight must not
+        # overwrite the real kickoff time a previous sync already recorded.
+        await sync_exec(
+            self.env,
+            "INSERT INTO fixtures (id, group_id, opponent, kickoff_at, venue, weighted_value_cents, source_ref) VALUES "
+            "('fix_1', NULL, 'Seattle Reign FC', '2026-10-04T19:00:00', 'Sunrise Stadium', 5000, "
+            "'https://www.nwslsoccer.com/match/1/denver-summit-vs-seattle-reign')",
+        )
+        html = "<html><body>" + _season_header() + _schedule_row(
+            "1", "Sunday, Oct 4", "Seattle Reign FC",
+            "bbbb2222bbbb2222bbbb2222bbbb2222", "Sunrise Stadium", "denver-summit-vs-seattle-reign",
+            is_home=True, status="FINISHED",
+        ) + "</body></html>"
+        js.fetch.install({NWSL_SCHEDULE_URL: FakeFetchResponse(html)})
+
+        await sync._sync_fixtures(self.env)
+
+        rows = await sync_query(self.env, "SELECT kickoff_at FROM fixtures WHERE id = 'fix_1'")
+        self.assertEqual(rows[0]["kickoff_at"], "2026-10-04T19:00:00")
+
+    async def test_fetch_nwsl_schedule_rejects_a_row_missing_denver_team_id(self):
+        # Both sides present, but neither is Denver Summit's own team id --
+        # without an explicit check, by_team_id.get(DENVER_ID) == "team-h"
+        # would silently resolve to False and fabricate an away fixture
+        # against whichever team happened to be found, instead of failing.
+        html = "<html><body>" + _season_header() + _schedule_row(
+            "1111aaaa1111aaaa1111aaaa1111aaaa", "Sunday, Oct 4", "Seattle Reign FC",
+            "bbbb2222bbbb2222bbbb2222bbbb2222", "Sunrise Stadium", "chicago-stars-vs-seattle-reign",
+            is_home=True, time_text="7:00 PM",
+        ).replace(DENVER_SUMMIT_TEAM_ID, "cccc3333cccc3333cccc3333cccc3333") + "</body></html>"
+        js.fetch.install({NWSL_SCHEDULE_URL: FakeFetchResponse(html)})
+
+        with self.assertRaises(SyncSourceError):
+            await fetch_nwsl_schedule(self.env)
+
+    async def test_fetch_nwsl_schedule_rejects_an_unparseable_kickoff(self):
+        # A date/time format change (or plain garbage) must not escape as a
+        # bare ValueError, which _safe() does not catch -- that would crash
+        # run_sync entirely instead of skipping just this one job.
+        html = "<html><body>" + _season_header() + _schedule_row(
+            "1111aaaa1111aaaa1111aaaa1111aaaa", "Sunday, Not-A-Month 99", "Seattle Reign FC",
+            "bbbb2222bbbb2222bbbb2222bbbb2222", "Sunrise Stadium", "denver-summit-vs-seattle-reign",
+            is_home=True, time_text="7:00 PM",
+        ) + "</body></html>"
+        js.fetch.install({NWSL_SCHEDULE_URL: FakeFetchResponse(html)})
+
+        with self.assertRaises(SyncSourceError):
+            await fetch_nwsl_schedule(self.env)
 
     async def test_fetch_nwsl_schedule_rejects_a_partial_parse(self):
         # A row whose data-matchid marker is found but whose team blocks

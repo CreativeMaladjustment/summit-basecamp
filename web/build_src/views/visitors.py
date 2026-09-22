@@ -58,7 +58,10 @@ def room():
 def dossier(op):
     empty_players_note = h(
         "p", {"style": {"margin": "0", "fontSize": "14px", "color": "var(--ink-mute)"}},
-        "Full team sheet not published here yet — see the latest meeting for who played.",
+        "Full team sheet not published here yet — see the ",
+        h("a", {"href": op["match_url"], "target": "_blank", "rel": "noopener noreferrer"},
+          "latest meeting"),
+        " for who played.",
     )
     return h(
         "section", {"style": {"marginTop": "14px"}},

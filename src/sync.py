@@ -303,8 +303,8 @@ async def _sync_fixtures(env):
             by_ref.setdefault(row["source_ref"], []).append(row)
     unmatched = [row for row in existing if not row["source_ref"]]
 
-    groups = await query(env, "SELECT id, total_seats FROM groups")
-    today = datetime.date.today()
+    groups = await query(env, "SELECT id, total_seats, season_year FROM groups")
+    now = datetime.datetime.now()
 
     updated = matched = created = 0
     for remote in remote_fixtures:
@@ -326,8 +326,13 @@ async def _sync_fixtures(env):
         for row in rows:
             matched += 1
             venue = remote["venue"] or row["venue"]
+            # A finished match's row carries no real kickoff time (see
+            # fetch_nwsl_schedule) -- its synthesized midnight is only good
+            # enough for date-window matching above, never for overwriting
+            # a kickoff time already on file.
+            kickoff_at = remote["kickoff_at"] if remote["kickoff_time_known"] else row["kickoff_at"]
             if (
-                row["kickoff_at"] != remote["kickoff_at"]
+                row["kickoff_at"] != kickoff_at
                 or row["venue"] != venue
                 or row["source_ref"] != remote["source_ref"]
             ):
@@ -338,7 +343,7 @@ async def _sync_fixtures(env):
                     SET kickoff_at = ?, venue = ?, source_ref = ?, last_synced_at = DATETIME('now')
                     WHERE id = ?
                     """,
-                    remote["kickoff_at"],
+                    kickoff_at,
                     venue,
                     remote["source_ref"],
                     row["id"],
@@ -354,18 +359,24 @@ async def _sync_fixtures(env):
         # A home match still ahead of kickoff gets a fresh fixture (every
         # seat unassigned) in every group that doesn't already have a row
         # for it -- see the module docstring for why away/past matches
-        # never do.
+        # never do. Compared against the full kickoff instant, not just the
+        # date: a date-only check would still treat today's early match as
+        # "upcoming" hours after it had already kicked off.
         if not remote["is_home"]:
             continue
-        remote_date = _parse_date(remote["kickoff_at"])
-        if remote_date is None or remote_date < today:
+        try:
+            remote_kickoff = datetime.datetime.fromisoformat(remote["kickoff_at"])
+        except ValueError:
             continue
+        if remote_kickoff <= now:
+            continue
+        remote_year = remote_kickoff.year
         matched_group_ids = {row["group_id"] for row in rows}
         for group in groups:
-            if group["id"] in matched_group_ids:
+            if group["id"] in matched_group_ids or group["season_year"] != remote_year:
                 continue
-            await _create_fixture_from_sync(env, group, remote)
-            created += 1
+            if await _create_fixture_from_sync(env, group, remote):
+                created += 1
 
     return {"matched": matched, "updated": updated, "created": created, "seen": len(remote_fixtures)}
 
@@ -381,34 +392,45 @@ async def _create_fixture_from_sync(env, group, remote):
     has claimed anything on a fixture nobody asked for yet. tier and
     weighted_value_cents get placeholders (a source page has no idea what
     your group's package costs); an admin corrects both by hand.
+
+    INSERT OR IGNORE against idx_fixtures_group_source_ref
+    (migrations/0007_fixture_source_ref_unique.sql) rather than a plain
+    INSERT: two sync runs can overlap (a deploy and the weekly schedule, or
+    a manual trigger racing either), and without this a second run that
+    also finds this group missing this match would insert a duplicate
+    fixture and its own full set of seats. If the insert is ignored because
+    another run already won, changed is 0 and this returns without
+    touching seat_allocations at all -- there is nothing here for it to
+    attach to.
     """
     fixture_id = new_id("fix")
+    changed = await execute(
+        env,
+        """
+        INSERT OR IGNORE INTO fixtures
+            (id, group_id, opponent, kickoff_at, venue, tier,
+             weighted_value_cents, source_ref, last_synced_at)
+        VALUES (?, ?, ?, ?, ?, 'standard', 0, ?, DATETIME('now'))
+        """,
+        fixture_id,
+        group["id"],
+        remote["opponent"],
+        remote["kickoff_at"],
+        remote["venue"],
+        remote["source_ref"],
+    )
+    if not changed:
+        return False
+
     writes = [
         (
-            """
-            INSERT INTO fixtures
-                (id, group_id, opponent, kickoff_at, venue, tier,
-                 weighted_value_cents, source_ref, last_synced_at)
-            VALUES (?, ?, ?, ?, ?, 'standard', 0, ?, DATETIME('now'))
-            """,
-            (
-                fixture_id,
-                group["id"],
-                remote["opponent"],
-                remote["kickoff_at"],
-                remote["venue"],
-                remote["source_ref"],
-            ),
+            "INSERT INTO seat_allocations (id, fixture_id, seat_number, status) VALUES (?, ?, ?, 'on_bench')",
+            (new_id("seat"), fixture_id, seat_number),
         )
+        for seat_number in range(1, int(group["total_seats"]) + 1)
     ]
-    for seat_number in range(1, int(group["total_seats"]) + 1):
-        writes.append(
-            (
-                "INSERT INTO seat_allocations (id, fixture_id, seat_number, status) VALUES (?, ?, ?, 'on_bench')",
-                (new_id("seat"), fixture_id, seat_number),
-            )
-        )
     await batch(env, writes)
+    return True
 
 
 def _parse_date(kickoff_at):
