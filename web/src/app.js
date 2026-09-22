@@ -579,8 +579,6 @@ function main() {
   });
 
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
-
-  document.getElementById('syn-switch')?.addEventListener('change', persist);
 }
 
 document.addEventListener('DOMContentLoaded', main);
