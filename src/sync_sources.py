@@ -22,7 +22,6 @@ from js import fetch
 # how the response body got parsed.
 NWSL_TEAM_SLUG = "cbfcacbef5bc4a278442c00926ac9ebc/denver-summit-fc"
 NWSL_SCHEDULE_URL = "https://www.nwslsoccer.com/teams/{}/schedule".format(NWSL_TEAM_SLUG)
-NWSL_ROSTER_URL = "https://www.nwslsoccer.com/teams/{}/roster".format(NWSL_TEAM_SLUG)
 
 # The team id nwslsoccer.com uses internally (the first path segment of
 # NWSL_TEAM_SLUG) -- used to tell which side of a match is "us" by id rather
@@ -33,6 +32,27 @@ NWSL_ROSTER_URL = "https://www.nwslsoccer.com/teams/{}/roster".format(NWSL_TEAM_
 # would have false positives too if some future opponent's name ever
 # contained "denver" or "summit").
 DENVER_SUMMIT_TEAM_ID = NWSL_TEAM_SLUG.split("/")[0]
+DENVER_SUMMIT_TEAM_SLUG = NWSL_TEAM_SLUG.split("/")[1]
+
+
+def _team_roster_url(team_id, team_slug):
+    """Any team's roster page, not just Denver Summit's -- fetch_nwsl_roster
+    takes (team_id, team_slug) so it can fetch an opponent's roster too, for
+    the Visitors dossiers. team_id is always solid (nwslsoccer.com's own
+    stable id for that club, read straight off the schedule page -- see
+    fetch_nwsl_schedule). team_slug is not: Denver Summit's own match-page
+    slug ("denver-summit") differs from its roster-page slug
+    ("denver-summit-fc"), so a same-pattern guess for another club is not
+    trustworthy either. Callers other than Denver Summit's own sync pass a
+    slug inferred from that club's official name and stored on
+    opponents.source_slug (see migrations/0006_opponent_sync.sql) -- expect
+    it to be wrong sometimes; fetch_nwsl_roster below fails loudly rather
+    than silently when it is.
+    """
+    return "https://www.nwslsoccer.com/teams/{}/{}/roster".format(team_id, team_slug)
+
+
+NWSL_ROSTER_URL = _team_roster_url(DENVER_SUMMIT_TEAM_ID, DENVER_SUMMIT_TEAM_SLUG)
 
 WIKIPEDIA_API = "https://en.wikipedia.org/w/api.php"
 # A descriptive User-Agent, as Wikimedia's API etiquette asks for.
@@ -122,9 +142,14 @@ def _parse_kickoff(date_text, time_text, year):
 async def fetch_nwsl_schedule(env=None):
     """Denver Summit's full-season match list, from the team schedule page.
 
-    Returns a list of dicts: source_ref, opponent, kickoff_at (ISO 8601),
-    venue, is_home. Includes finished matches as well as upcoming ones --
-    filtering to what's still ahead is sync.py's job, not this module's.
+    Returns a list of dicts: source_ref, opponent, opponent_team_id,
+    kickoff_at (ISO 8601), venue, is_home. Includes finished matches as well
+    as upcoming ones -- filtering to what's still ahead is sync.py's job,
+    not this module's. opponent_team_id is nwslsoccer.com's own stable id
+    for the opposing club, a byproduct of reading data-team-id off the row
+    -- useful for matching an opponent by id instead of by name (see
+    sync._sync_opponents), where the old claim that opponents have no
+    stable identifier no longer holds.
 
     The schedule tab renders no JSON-LD (verified against a real snapshot
     of the page on 2026-09-21) -- it's a plain match-list widget, one <tr>-
@@ -171,13 +196,18 @@ async def fetch_nwsl_schedule(env=None):
             continue
 
         is_home = by_team_id.get(DENVER_SUMMIT_TEAM_ID) == "team-h"
-        opponent = by_side["team-a"] if is_home else by_side["team-h"]
+        opponent_side = "team-a" if is_home else "team-h"
+        opponent = by_side[opponent_side]
+        opponent_team_id = next(
+            (team_id for team_id, side in by_team_id.items() if side == opponent_side), None
+        )
         time_match = _SCHEDULE_TIME_RE.search(row)
 
         fixtures.append(
             {
                 "source_ref": url_match.group(1),
                 "opponent": opponent,
+                "opponent_team_id": opponent_team_id,
                 "kickoff_at": _parse_kickoff(
                     current_date, time_match.group(1) if time_match else None, season_year
                 ),
@@ -223,23 +253,26 @@ _POSITION_CODES = {
 }
 
 
-async def fetch_nwsl_roster(env=None):
-    """Denver Summit's current roster, from the team roster page.
+async def fetch_nwsl_roster(env=None, team_id=DENVER_SUMMIT_TEAM_ID, team_slug=DENVER_SUMMIT_TEAM_SLUG):
+    """A team's current roster, from its team roster page. Defaults to
+    Denver Summit's own; pass team_id/team_slug to fetch any other club's
+    (see _team_roster_url for why team_slug is not guaranteed correct for
+    a club other than Denver Summit).
 
     Returns a list of dicts: source_ref, name, jersey_number, position.
 
     The roster tab renders no JSON-LD (verified against a real snapshot of
-    the page on 2026-09-21) -- it's a server-rendered Next.js table, one
-    <tr> per player -- so this scrapes that table directly. Raises
-    SyncSourceError rather than returning a partial roster when any row's
-    name can't be parsed, not just when none can: _sync_roster deactivates
-    every existing player not present in what this returns, so a markup
-    change that still finds every row marker (data-player-id) but breaks
-    just the name spans would otherwise look like a clean, smaller roster
-    and deactivate everyone missing from it, rather than skip the run as a
-    fetch failure normally would.
+    Denver Summit's own roster page on 2026-09-21) -- it's a server-rendered
+    Next.js table, one <tr> per player -- so this scrapes that table
+    directly. Raises SyncSourceError rather than returning a partial roster
+    when any row's name can't be parsed, not just when none can:
+    _sync_roster deactivates every existing player not present in what this
+    returns, so a markup change that still finds every row marker
+    (data-player-id) but breaks just the name spans would otherwise look
+    like a clean, smaller roster and deactivate everyone missing from it,
+    rather than skip the run as a fetch failure normally would.
     """
-    html = await _get_text(NWSL_ROSTER_URL)
+    html = await _get_text(_team_roster_url(team_id, team_slug))
     starts = [match.start() for match in _ROSTER_ROW_START_RE.finditer(html)]
     if not starts:
         raise SyncSourceError("no roster rows found on the roster page")

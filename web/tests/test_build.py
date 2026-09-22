@@ -114,8 +114,15 @@ class ViewsRenderCleanly(unittest.TestCase):
         self.assertTrue(tilts, "expected at least one tilted element")
         self.assertTrue(all(t <= 0.6 for t in tilts), tilts)
 
-    def test_danger_flag_present_for_at_least_one_visiting_player(self):
-        self.assertIn("DANGER", str(self.pieces["visitors"]))
+    def test_visitors_shows_an_honest_note_when_a_club_has_no_players_listed(self):
+        # OPPONENTS carries no invented players (or "danger" tags -- that
+        # was scouting-style commentary nowhere public to verify, same as
+        # form/shape/quick_stats); every dossier's players list is empty
+        # until real ones sync in from D1, so the empty state should say so
+        # rather than the section just vanishing.
+        s = str(self.pieces["visitors"])
+        self.assertNotIn("DANGER", s)
+        self.assertIn("Full team sheet not published here yet", s)
 
 
 class FullPageIntegrity(unittest.TestCase):

@@ -117,6 +117,12 @@ def _urlenc(text):
 
 
 # ---------- Home Team (the Locker Room) ----------
+# The real, verified roster page src/sync_sources.py reads (see
+# NWSL_ROSTER_URL there) -- used as the "Club bio" link for every Home Team
+# player, replacing a guessed denversummitfc.com URL that was never
+# confirmed to be real.
+DENVER_ROSTER_URL = "https://www.nwslsoccer.com/teams/cbfcacbef5bc4a278442c00926ac9ebc/denver-summit-fc/roster"
+
 SQUAD = [
     {"id": "p1", "num": 1, "name": "Abby Smith", "pos": "GK",
      "stats": [("Position", "Goalkeeper"), ("Nationality", "USA")],
@@ -207,46 +213,45 @@ SQUAD = [
 POSITIONS = ["Whole squad", "GK", "DEF", "MID", "FWD"]
 
 # ---------- Visitors (the visiting club's dressing room) ----------
+# Denver Summit's five remaining 2026 opponents (both home and away legs
+# against every other club have already happened, except these five), from
+# the same schedule snapshot FIXTURES above comes from. `recent_result` is
+# the real final score from the meeting already played this season;
+# `match_url` is that match's own real nwslsoccer.com page, used as the
+# "Latest meeting" link on each player card. No invented scouting prose
+# (form, tactical shape, "danger player" tags) and no invented players --
+# none of that is published anywhere to verify, so both are left out rather
+# than guessed. Real per-club rosters exist in D1 (opponent_players), kept
+# current by src/sync.py's _sync_opponent_rosters using the same verified
+# roster-page URLs for all 15 NWSL clubs (see seed/opponents_seed.sql) --
+# this static build just doesn't read from D1 at all yet, the same
+# frontend/backend gap noted for the roster and schedule.
 OPPONENTS = [
-    {"id": "op_por", "club": "Portland Thorns", "chip": "Portland · 9/26",
-     "home_date": "9/26", "away_date": "5/9", "away_venue": "Providence Park",
-     "form": "W W D L W", "shape": "4-3-3, inverted right back, high line they will not drop.",
-     "quick_stats": [("Goals for", "31"), ("Goals against", "19"), ("Away wins", "5")],
-     "halftime": "They press the goal kick for twenty minutes and then stop. Play through the first twenty and the second half opens up.",
-     "players": [
-         {"id": "o1", "num": 9, "name": "Marisol Vega", "pos": "FWD", "danger": True,
-          "note": "Every dangerous move starts with her drifting to the left half-space. Track it or lose the game."},
-         {"id": "o2", "num": 6, "name": "Elin Sandberg", "pos": "MID", "danger": False,
-          "note": "Screens the back four. Slow across the ground — go at her sideways, not through her."},
-         {"id": "o3", "num": 2, "name": "Dara Whitfield", "pos": "DEF", "danger": False,
-          "note": "Overlaps constantly and recovers late. The space behind her is the game."},
-     ]},
-    {"id": "op_bay", "club": "Bay FC", "chip": "Bay · 10/3",
-     "home_date": "10/3", "away_date": "6/20", "away_venue": "PayPal Park",
-     "form": "L D W L D", "shape": "4-4-2 block, counters through the left channel.",
-     "quick_stats": [("Goals for", "22"), ("Goals against", "26"), ("Away wins", "2")],
-     "halftime": "They sit, they absorb, and they break once. Keep a body on the counter and the afternoon is comfortable.",
-     "players": [
-         {"id": "o4", "num": 11, "name": "Noor Haddad", "pos": "FWD", "danger": True,
-          "note": "The one who hurts you on the break. Nine of her twelve goals came inside four passes."},
-         {"id": "o5", "num": 8, "name": "Robin Castellanos", "pos": "MID", "danger": False,
-          "note": "Takes every set piece. Left foot, near post, in-swinging."},
-         {"id": "o6", "num": 1, "name": "Ada Lindgren", "pos": "GK", "danger": False,
-          "note": "Strong hands, hesitant feet. Press the back pass."},
-     ]},
-    {"id": "op_acf", "club": "Angel City FC", "chip": "Angel City · 10/18",
-     "home_date": "10/18", "away_date": "7/11", "away_venue": "BMO Stadium",
-     "form": "W W W D W", "shape": "3-4-3, wing-backs high, three at the back that can be turned.",
-     "quick_stats": [("Goals for", "36"), ("Goals against", "17"), ("Away wins", "7")],
-     "halftime": "The wing-backs are still up the pitch at 60 minutes. That is when the diagonal behind them is on.",
-     "players": [
-         {"id": "o7", "num": 7, "name": "Céline Abara", "pos": "FWD", "danger": True,
-          "note": "Best player on either team most weeks. Double her the moment she faces up."},
-         {"id": "o8", "num": 3, "name": "Wren Okonkwo", "pos": "DEF", "danger": False,
-          "note": "Left of the three. Comfortable stepping in, uncomfortable turning."},
-         {"id": "o9", "num": 16, "name": "Tamsin Reyes", "pos": "MID", "danger": False,
-          "note": "Runs the whole game at one speed. Tires after 70."},
-     ]},
+    {"id": "op_kc", "club": "Kansas City Current", "chip": "Kansas City Current · 9/26",
+     "home_date": "7/3", "away_date": "9/26", "away_venue": "CPKC Stadium",
+     "recent_result": "Denver lost 0–3 at home on 7/3 — the only meeting so far this season.",
+     "match_url": "https://www.nwslsoccer.com/match/ec7d28b04d3d4a9ca6d024c41a37702f/denver-summit-vs-kansas-city-current",
+     "players": []},
+    {"id": "op_chi", "club": "Chicago Stars", "chip": "Chicago Stars · 10/4",
+     "home_date": "8/29", "away_date": "10/4", "away_venue": "Northwestern Medicine Field at Martin Stadium",
+     "recent_result": "Denver won 6–1 at home on 8/29 — the only meeting so far this season.",
+     "match_url": "https://www.nwslsoccer.com/match/2f72ffec33184cf09348bbc1481856a5/denver-summit-vs-chicago-stars",
+     "players": []},
+    {"id": "op_acf", "club": "Angel City", "chip": "Angel City · 10/17",
+     "home_date": "10/17", "away_date": "9/11", "away_venue": "BMO Stadium",
+     "recent_result": "Denver drew 3–3 away on 9/11 — the only meeting so far this season.",
+     "match_url": "https://www.nwslsoccer.com/match/6917097b9b664560a221408c048d4257/angel-city-vs-denver-summit",
+     "players": []},
+    {"id": "op_rl", "club": "Racing Louisville", "chip": "Racing Louisville · 10/24",
+     "home_date": "10/24", "away_date": "5/29", "away_venue": "Lynn Family Stadium",
+     "recent_result": "Denver won 1–0 away on 5/29 — the only meeting so far this season.",
+     "match_url": "https://www.nwslsoccer.com/match/3bd415d8b50c4025819575e1942de7db/racing-louisville-vs-denver-summit",
+     "players": []},
+    {"id": "op_ncc", "club": "North Carolina Courage", "chip": "North Carolina Courage · 11/1",
+     "home_date": "8/5", "away_date": "11/1", "away_venue": "First Horizon Stadium at WakeMed Soccer Park",
+     "recent_result": "Denver lost 0–2 at home on 8/5 — the only meeting so far this season.",
+     "match_url": "https://www.nwslsoccer.com/match/b8beb36b96a94acd8f35d2cc14d7e7c1/denver-summit-vs-north-carolina-courage",
+     "players": []},
 ]
 
 # ---------- Hearthside Notes ----------
@@ -254,8 +259,8 @@ HEARTHSIDE_NOTES = [
     {"kind": "player", "eyebrow": "Key player to watch", "num": 9, "name": "Yazmeen Ryan",
      "pos": "Forward · Denver Summit FC",
      "body": "Wears the 9 up top for Summit this season. See the Locker Room tab for the full squad."},
-    {"kind": "tactics", "eyebrow": "Rivalry note", "name": "Portland hold a high line",
-     "body": "Portland have not dropped their line all season, and Summit have the two quickest forwards in the league. The game is decided in the twenty yards behind Dara Whitfield."},
+    {"kind": "tactics", "eyebrow": "Up next", "name": "Kansas City Current, on the road",
+     "body": "Denver lost 0–3 to them at home back on 7/3 — the rematch is 9/26, away at CPKC Stadium. See the Visitors tab for the full dossier."},
     {"kind": "trivia", "eyebrow": "Tap to reveal", "question": "What home ground does Denver Summit play at?",
      "answer": "Centennial Stadium — out in Centennial, Colorado, in the thin air the away sign likes to remind visitors about."},
 ]

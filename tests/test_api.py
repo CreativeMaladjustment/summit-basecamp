@@ -27,6 +27,7 @@ SCHEMA = [
     os.path.join(ROOT, "migrations", "0003_national_team.sql"),
     os.path.join(ROOT, "migrations", "0004_sync_metadata.sql"),
     os.path.join(ROOT, "migrations", "0005_roster_jersey_nullable.sql"),
+    os.path.join(ROOT, "migrations", "0006_opponent_sync.sql"),
 ]
 SEED = os.path.join(ROOT, "seed", "dev_seed.sql")
 
@@ -538,13 +539,16 @@ class ApiTests(unittest.TestCase):
         status, payload = call(self.env, "GET", "/api/opponents")
         self.assertEqual(status, 200)
         opponents = payload["opponents"]
-        self.assertEqual(len(opponents), 3)
-        portland = opponents[0]
-        self.assertEqual(portland["club"], "Portland Thorns")
-        self.assertEqual(portland["quick_stats"], [["Goals for", "31"], ["Goals against", "19"], ["Away wins", "5"]])
-        self.assertEqual([p["name"] for p in portland["players"]], ["Marisol Vega", "Elin Sandberg", "Dara Whitfield"])
-        self.assertIs(portland["players"][0]["is_danger"], True)
-        self.assertIs(portland["players"][1]["is_danger"], False)
+        # All 15 other NWSL clubs are seeded (see seed/opponents_seed.sql),
+        # not just Denver Summit's remaining 2026 opponents.
+        self.assertEqual(len(opponents), 15)
+        angel_city = opponents[0]
+        self.assertEqual(angel_city["club"], "Angel City")
+        self.assertEqual(angel_city["source_ref"], "9587b8ce40624165903b6bc9fd252634")
+        # No real per-club rosters are seeded -- opponent_players is
+        # populated by src/sync.py's _sync_opponent_rosters, not by hand.
+        self.assertEqual(angel_city["quick_stats"], [])
+        self.assertEqual(angel_city["players"], [])
 
 
 class ScheduledTests(unittest.TestCase):

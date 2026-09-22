@@ -17,8 +17,10 @@ holds the root-relative path to each one, falling back to
 | `migrations/0001_initial.sql` | The D1 schema |
 | `migrations/0002_roster.sql` | Home-team squad and opponent dossiers |
 | `migrations/0003_national_team.sql` | National-team caps history for squad players |
-| `seed/dev_seed.sql` | Four members, two fixtures, a part-paid ledger, the squad and opponent dossiers -- dev only, not safe to run against production (see below) |
-| `seed/roster_seed.sql` | Just the real roster, safe to run against production (`wrangler d1 execute ... --remote --file=seed/roster_seed.sql`) as a one-off; the sync job is the ongoing way this table gets updated |
+| `migrations/0006_opponent_sync.sql` | Sync tracking columns (`source_ref`, `source_slug`, `match_url`) for opponents/opponent_players, and nullable `opponent_players.jersey_number` |
+| `seed/dev_seed.sql` | Four members, two fixtures, a part-paid ledger, the squad and all 15 opponent dossiers -- dev only, not safe to run against production (see below) |
+| `seed/roster_seed.sql` | Just the real home roster, safe to run against production (`wrangler d1 execute ... --remote --file=seed/roster_seed.sql`) as a one-off; the sync job is the ongoing way this table gets updated |
+| `seed/opponents_seed.sql` | All 15 real opponent dossiers, safe to run against production -- **not** just an optional bootstrap like the other two seeds; the sync job never creates an opponent row from nothing, only updates ones this file (or an equivalent) already put there |
 | `src/entry.py` | `on_fetch` route table, `on_scheduled` cron jobs |
 | `src/router.py` | Path matching (`/api/groups/{group_id}/fixtures`) |
 | `src/handlers.py` | One function per endpoint, including admin-only `trigger_sync` |
@@ -26,7 +28,7 @@ holds the root-relative path to each one, falling back to
 | `src/auth.py` | Bearer token to user, membership and admin checks |
 | `src/splits.py` | Expense-split and settle-up arithmetic |
 | `src/responses.py` | JSON responses and `ApiError` |
-| `src/sync.py` | Roster/fixture/headshot sync: diffs external data against D1 and writes what drifted |
+| `src/sync.py` | Roster/fixture/opponent/headshot sync: diffs external data against D1 and writes what drifted |
 | `src/sync_sources.py` | Fetching and parsing for the NWSL and Wikipedia sources `sync.py` reconciles against |
 | `.github/workflows/sync-roster.yml` | Triggers the sync via `POST /api/admin/sync`, on deploy and on a weekly schedule |
 
@@ -123,16 +125,18 @@ signed-in user. Set it once as the `CF_SYNC_ADMIN_TOKEN` secret in the
 pushes that value to the Worker on every deploy, so there is no
 `wrangler secret put` to run by hand.
 
-### Roster/fixture/headshot sync
+### Roster/fixture/opponent/headshot sync
 
-`src/sync.py` runs four independent jobs: roster and fixture facts from
-nwslsoccer.com's Denver Summit team pages, and player headshots from
-Wikipedia's API, filtered to CC0/CC-BY/public-domain licenses only. Neither
-the schedule page nor the roster page renders JSON-LD (both were assumed
-to; verified against real snapshots of both on 2026-09-21/22 that neither
-does) -- both are plain server-rendered markup (a match-list widget and a
-roster table), so both jobs scrape that markup directly. See
-`src/sync_sources.py` for both parsers, and what happens if either page's
+`src/sync.py` runs five independent jobs: roster and fixture facts from
+nwslsoccer.com's Denver Summit team page, opponent facts and rosters from
+the same site's pages for the other 15 NWSL clubs, and player headshots
+from Wikipedia's API, filtered to CC0/CC-BY/public-domain licenses only.
+Neither the schedule page nor a roster page (Denver Summit's or any other
+club's -- they share the same page template) renders JSON-LD (both were
+assumed to; verified against real snapshots of both on 2026-09-21/22 that
+neither does) -- both are plain server-rendered markup (a match-list widget
+and a roster table), so every job that touches either scrapes that markup
+directly. See `src/sync_sources.py` for both parsers, and what happens if either page's
 markup changes -- each raises rather than returning a partial result if
 even one row fails to parse, since a shorter-but-nonempty result would
 otherwise look like a clean, smaller roster/schedule instead of a broken
@@ -159,15 +163,35 @@ Away fixtures and ones that have already kicked off never create anything:
 this app only ever sells seats at the home venue, and a match already
 played has nothing left to claim. Opponent dossiers are still only ever
 updated, never created here -- the scouting content that makes a dossier
-useful (form, shape, halftime read) has to come from a person, so this job
-only keeps an existing dossier's dates current.
+useful (a real result, a real roster) still needs `seed/opponents_seed.sql`
+run once first, the same way a fixture still needs a syndicate to hold it
+before sync can touch it.
 
 Roster players not seen in a run are marked `active = FALSE` rather than
 deleted, so their stats and national-team history survive a departure;
-`GET /api/roster` only returns active players. Opponents have no
-`source_ref` -- nwslsoccer.com's schedule data carries no stable per-club
-identifier, only the name, so matching stays name-based and a club rename
-upstream needs a manual re-match.
+`GET /api/roster` only returns active players. Opponents are matched by
+`source_ref` too now -- nwslsoccer.com's own team id for that club, read
+off the schedule page's `data-team-id` for free while parsing fixtures
+(`fetch_nwsl_schedule`'s `opponent_team_id`) -- falling back to a name
+match and setting `source_ref` the first time that succeeds, same
+two-step pattern as the roster. The previous claim that opponents have no
+stable identifier only held before the schedule page's real markup was
+scraped.
+
+A fifth job, `_sync_opponent_rosters`, reconciles each tracked opponent's
+real players into `opponent_players`, the same insert/update/deactivate
+logic as the home roster but scoped to one `opponent_id` at a time. An
+opponent is "tracked" once it has both `source_ref` and `source_slug` (that
+club's own roster-page slug) on file; `seed/opponents_seed.sql` seeds both,
+verified directly against nwslsoccer.com for all 15 clubs rather than
+guessed from a naming pattern -- Denver Summit's own roster-page slug
+(`denver-summit-fc`) does not match its match-page slug (`denver-summit`),
+so the same pattern can't be trusted for any other club either. A club
+missing either column is silently left alone (nothing to fetch yet); a
+wrong or dead `source_slug` shows up as a per-club error in that job's
+result instead of failing the whole sync -- see
+`sync._sync_one_opponent_roster` and its caller for how a bad one gets
+caught rather than corrupting data.
 
 There is no object storage (see above), so a sync-sourced headshot is stored
 as the full Wikimedia Commons URL rather than a path under

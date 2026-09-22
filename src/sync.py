@@ -1,8 +1,11 @@
-"""Reconcile roster, fixture and headshot data against external sources.
+"""Reconcile roster, fixture, opponent and headshot data against external
+sources.
 
-Run weekly from the cron in entry.py (`on_scheduled`). Each of the three
-jobs below fetches its source through sync_sources, matches what it got
-against the existing rows, and writes only what drifted -- existing rows
+Run via POST /api/admin/sync (src/handlers.trigger_sync), triggered by
+.github/workflows/sync-roster.yml -- not a Worker cron; see that file and
+docs/backend.md for why. Each job below fetches its source through
+sync_sources, matches what it got against the existing rows, and writes
+only what drifted -- existing rows
 keep their id and any hand-curated fields (scouting_note, stats_json, ...)
 that the source does not speak to. A source field that came back empty
 (missing jersey number, missing position, missing venue) never overwrites an
@@ -53,13 +56,14 @@ FIXTURE_REMATCH_WINDOW = datetime.timedelta(days=21)
 
 
 async def run_sync(env):
-    """Run all three jobs. Each is independent -- one failing does not stop
-    the others, since e.g. nwslsoccer.com being unreachable should not also
+    """Run every job. Each is independent -- one failing does not stop the
+    others, since e.g. nwslsoccer.com being unreachable should not also
     block the Wikipedia headshot pass."""
     return {
         "roster": await _safe(_sync_roster, env),
         "fixtures": await _safe(_sync_fixtures, env),
         "opponents": await _safe(_sync_opponents, env),
+        "opponent_rosters": await _safe(_sync_opponent_rosters, env),
         "headshots": await _safe(_sync_headshots, env),
     }
 
@@ -154,6 +158,128 @@ async def _sync_roster(env):
     still_active = [row["id"] for row in existing if row["id"] not in seen_ids and row["active"]]
     for player_id in still_active:
         await execute(env, "UPDATE roster_players SET active = FALSE WHERE id = ?", player_id)
+        deactivated += 1
+
+    return {
+        "inserted": inserted,
+        "updated": updated,
+        "skipped": skipped,
+        "reactivated": reactivated,
+        "deactivated": deactivated,
+        "seen": len(remote_players),
+    }
+
+
+async def _sync_opponent_rosters(env):
+    """Reconcile each tracked opponent's real roster against
+    opponent_players, one club at a time -- otherwise the same
+    insert/update/deactivate logic as _sync_roster, just scoped to one
+    opponent_id instead of the whole table (kept as its own copy rather
+    than sharing code with _sync_roster: the two INSERTs need different
+    columns, and stringly-built SQL to paper over that is worse than the
+    duplication).
+
+    An opponent only gets fetched once both opponents.source_ref (its
+    nwslsoccer.com team id, set by _sync_opponents) and
+    opponents.source_slug (that club's own roster-page slug -- see
+    migrations/0006_opponent_sync.sql) are on file; one missing either is
+    silently left alone, not an error, since there is nothing to fetch yet
+    rather than something that failed. A club added to seed/opponents_seed.sql
+    without a verified slug (or a slug that turns out wrong) shows up as a
+    SyncSourceError for just that club in the returned per-club results,
+    the same safety net fetch_nwsl_roster's other callers rely on -- see
+    docs/backend.md.
+    """
+    opponents = await query(env, "SELECT id, club, source_ref, source_slug FROM opponents")
+    tracked = [row for row in opponents if row["source_ref"] and row["source_slug"]]
+
+    results = {}
+    for opponent in tracked:
+        try:
+            remote_players = await fetch_nwsl_roster(
+                env, team_id=opponent["source_ref"], team_slug=opponent["source_slug"]
+            )
+        except SyncSourceError as error:
+            results[opponent["club"]] = {"error": str(error)}
+            continue
+        results[opponent["club"]] = await _sync_one_opponent_roster(env, opponent["id"], remote_players)
+    return {"tracked": len(tracked), "clubs": results}
+
+
+async def _sync_one_opponent_roster(env, opponent_id, remote_players):
+    existing = await query(
+        env,
+        "SELECT id, source_ref, name, jersey_number, position, active FROM opponent_players WHERE opponent_id = ?",
+        opponent_id,
+    )
+    by_ref = {row["source_ref"]: row for row in existing if row["source_ref"]}
+    by_name = {row["name"]: row for row in existing}
+
+    inserted = updated = skipped = reactivated = 0
+    seen_ids = set()
+    for remote in remote_players:
+        row = by_ref.get(remote["source_ref"]) or by_name.get(remote["name"])
+        if row is None:
+            if remote["jersey_number"] is None or not remote["position"]:
+                skipped += 1
+                continue
+            new_row_id = new_id("opp_plr")
+            await execute(
+                env,
+                """
+                INSERT INTO opponent_players
+                    (id, opponent_id, jersey_number, name, position, source_ref, last_synced_at)
+                VALUES (?, ?, ?, ?, ?, ?, DATETIME('now'))
+                """,
+                new_row_id,
+                opponent_id,
+                remote["jersey_number"],
+                remote["name"],
+                remote["position"],
+                remote["source_ref"],
+            )
+            inserted += 1
+            seen_ids.add(new_row_id)
+            continue
+
+        seen_ids.add(row["id"])
+        jersey_number = remote["jersey_number"] if remote["jersey_number"] is not None else row["jersey_number"]
+        position = remote["position"] or row["position"]
+        if (
+            row["jersey_number"] != jersey_number
+            or row["position"] != position
+            or row["name"] != remote["name"]
+            or row["source_ref"] != remote["source_ref"]
+            or not row["active"]
+        ):
+            if not row["active"]:
+                reactivated += 1
+            await execute(
+                env,
+                """
+                UPDATE opponent_players
+                SET jersey_number = ?, position = ?, name = ?, source_ref = ?,
+                    active = TRUE, last_synced_at = DATETIME('now')
+                WHERE id = ?
+                """,
+                jersey_number,
+                position,
+                remote["name"],
+                remote["source_ref"],
+                row["id"],
+            )
+            updated += 1
+        else:
+            await execute(
+                env,
+                "UPDATE opponent_players SET last_synced_at = DATETIME('now') WHERE id = ?",
+                row["id"],
+            )
+
+    deactivated = 0
+    still_active = [row["id"] for row in existing if row["id"] not in seen_ids and row["active"]]
+    for player_id in still_active:
+        await execute(env, "UPDATE opponent_players SET active = FALSE WHERE id = ?", player_id)
         deactivated += 1
 
     return {
@@ -308,28 +434,33 @@ async def _sync_opponents(env):
     dossier useful has to come from a human, so this job only keeps the
     dates on dossiers that already exist current.
 
-    Matched by club name only -- nwslsoccer.com's schedule JSON-LD gives no
-    other stable identifier for the opponent team (see fetch_nwsl_schedule),
-    so a club rename upstream would need a manual re-match here; there's
-    nothing to key a source_ref off in the meantime.
+    Matched by source_ref (nwslsoccer.com's own team id for that club, read
+    off the schedule page -- see fetch_nwsl_schedule) when a row already has
+    one, falling back to a club-name match for rows that predate this and
+    setting source_ref the first time that succeeds -- same two-step
+    matching _sync_roster uses. A club rename upstream no longer needs a
+    manual re-match once source_ref is set, unlike the previous name-only
+    matching this replaced.
     """
     remote_fixtures = await fetch_nwsl_schedule(env)
-    existing = await query(env, "SELECT id, club, home_date, away_date FROM opponents")
+    existing = await query(env, "SELECT id, club, source_ref, home_date, away_date FROM opponents")
+    by_ref = {row["source_ref"]: row for row in existing if row["source_ref"]}
     by_club = {row["club"]: row for row in existing}
 
     updated = 0
     for remote in remote_fixtures:
-        row = by_club.get(remote["opponent"])
+        row = by_ref.get(remote["opponent_team_id"]) or by_club.get(remote["opponent"])
         if row is None:
             continue
         date = remote["kickoff_at"][:10]
         field = "home_date" if remote["is_home"] else "away_date"
-        if row[field] == date:
+        if row[field] == date and row["source_ref"] == remote["opponent_team_id"]:
             continue
         await execute(
             env,
-            "UPDATE opponents SET {} = ?, last_synced_at = DATETIME('now') WHERE id = ?".format(field),
+            "UPDATE opponents SET {} = ?, source_ref = ?, last_synced_at = DATETIME('now') WHERE id = ?".format(field),
             date,
+            remote["opponent_team_id"],
             row["id"],
         )
         updated += 1

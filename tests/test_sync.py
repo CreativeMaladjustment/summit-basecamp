@@ -39,6 +39,7 @@ SCHEMA = [
     os.path.join(ROOT, "migrations", "0003_national_team.sql"),
     os.path.join(ROOT, "migrations", "0004_sync_metadata.sql"),
     os.path.join(ROOT, "migrations", "0005_roster_jersey_nullable.sql"),
+    os.path.join(ROOT, "migrations", "0006_opponent_sync.sql"),
 ]
 
 def _season_header(year=2026):
@@ -510,11 +511,71 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
         # No fetch responses installed at all -- roster/fixtures/opponents
         # each call fetch and get FetchNotStubbed, wrapped as
         # SyncSourceError; headshots has no roster rows to look up in this
-        # empty env, so it succeeds trivially rather than failing.
+        # empty env, so it succeeds trivially rather than failing, and so
+        # does opponent_rosters -- there are no opponents to try fetching.
         summary = await sync.run_sync(self.env)
         for job_name in ("roster", "fixtures", "opponents"):
             self.assertIn("error", summary[job_name])
         self.assertNotIn("error", summary["headshots"])
+        self.assertNotIn("error", summary["opponent_rosters"])
+
+    async def _seed_opponent(self, opponent_id="op_1", club="Angel City", source_ref=None, source_slug=None):
+        await sync_exec(
+            self.env,
+            "INSERT INTO opponents (id, club, chip_label, source_ref, source_slug) VALUES (?, ?, ?, ?, ?)",
+            opponent_id,
+            club,
+            club,
+            source_ref,
+            source_slug,
+        )
+
+    async def test_opponent_roster_sync_skips_a_club_with_no_source_on_file(self):
+        await self._seed_opponent(source_ref=None, source_slug=None)
+
+        result = await sync._sync_opponent_rosters(self.env)
+
+        self.assertEqual(result["tracked"], 0)
+        players = await sync_query(self.env, "SELECT COUNT(*) AS n FROM opponent_players")
+        self.assertEqual(players[0]["n"], 0)
+
+    async def test_opponent_roster_sync_inserts_real_players_for_a_tracked_club(self):
+        await self._seed_opponent(source_ref="9587b8ce40624165903b6bc9fd252634", source_slug="angel-city-fc")
+        roster_html = (
+            "<html><body><table><tbody>"
+            + _roster_row("cccc3333cccc3333cccc3333cccc3333", "Sam", "Striker", "sam-striker", 7, "Forward")
+            + "</tbody></table></body></html>"
+        )
+        js.fetch.install(
+            {
+                "https://www.nwslsoccer.com/teams/9587b8ce40624165903b6bc9fd252634/angel-city-fc/roster": FakeFetchResponse(
+                    roster_html
+                )
+            }
+        )
+
+        result = await sync._sync_opponent_rosters(self.env)
+
+        self.assertEqual(result["tracked"], 1)
+        self.assertEqual(result["clubs"]["Angel City"]["inserted"], 1)
+        players = await sync_query(
+            self.env, "SELECT name, jersey_number, position, opponent_id FROM opponent_players"
+        )
+        self.assertEqual(len(players), 1)
+        self.assertEqual(players[0]["name"], "Sam Striker")
+        self.assertEqual(players[0]["jersey_number"], 7)
+        self.assertEqual(players[0]["position"], "FWD")
+        self.assertEqual(players[0]["opponent_id"], "op_1")
+
+    async def test_opponent_roster_sync_records_a_per_club_error_without_raising(self):
+        # A wrong or dead source_slug fails just that club's fetch (via
+        # FetchNotStubbed here, standing in for a real 404) -- the job
+        # itself still returns normally, per-club failures included.
+        await self._seed_opponent(source_ref="9587b8ce40624165903b6bc9fd252634", source_slug="angel-city-fc")
+
+        result = await sync._sync_opponent_rosters(self.env)
+
+        self.assertIn("error", result["clubs"]["Angel City"])
 
 
 async def sync_exec(env, sql, *params):
