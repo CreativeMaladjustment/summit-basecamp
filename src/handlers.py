@@ -531,6 +531,18 @@ async def list_fixtures(request, env, params):
 
 
 async def create_fixture(request, env, params):
+    """Admin-only: add a fixture, seeding one seat_allocation per seat.
+
+    The seat count and default-seat assignments used to seed them are read
+    live, inside the same batch/transaction as the fixture insert itself
+    (the WITH RECURSIVE below, bounded by a correlated subquery against
+    groups.total_seats, plus the LEFT JOIN against group_members), not from
+    a Python-side read taken moments earlier: an admin resizing total_seats
+    (PATCH /api/groups/{id}) concurrently with this could otherwise commit
+    the resize's own "add a seat to every existing fixture" pass before
+    this fixture exists to be reconciled by it, and this handler's own
+    then-stale seat count would permanently under-seed it.
+    """
     user = await current_user(request, env)
     group_id = params["group_id"]
     await require_admin(env, group_id, user["id"])
@@ -542,7 +554,7 @@ async def create_fixture(request, env, params):
     if tier not in FIXTURE_TIERS:
         raise ApiError(400, "tier must be one of: " + ", ".join(FIXTURE_TIERS))
 
-    group = await query_one(env, "SELECT * FROM groups WHERE id = ?", group_id)
+    group = await query_one(env, "SELECT id FROM groups WHERE id = ?", group_id)
     if group is None:
         raise ApiError(404, "No such syndicate")
 
@@ -563,34 +575,25 @@ async def create_fixture(request, env, params):
                 tier,
                 weighted_value_cents,
             ),
-        )
-    ]
-
-    # Seed one allocation per seat, pre-assigned to whoever holds that seat
-    # number by default. Members move them to the bench from there.
-    members = await _members(env, group_id)
-    by_seat = {
-        member["default_seat_number"]: member["id"]
-        for member in members
-        if member.get("default_seat_number")
-    }
-    for seat_number in range(1, int(group["total_seats"]) + 1):
-        writes.append(
-            (
-                """
-                INSERT INTO seat_allocations
-                    (id, fixture_id, seat_number, assigned_user_id, status)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    new_id("seat"),
-                    fixture_id,
-                    seat_number,
-                    by_seat.get(seat_number),
-                    "confirmed" if by_seat.get(seat_number) else "on_bench",
-                ),
+        ),
+        (
+            """
+            WITH RECURSIVE seat_numbers(n) AS (
+                SELECT 1
+                UNION ALL
+                SELECT n + 1 FROM seat_numbers
+                WHERE n < (SELECT total_seats FROM groups WHERE id = ?)
             )
-        )
+            INSERT INTO seat_allocations (id, fixture_id, seat_number, assigned_user_id, status)
+            SELECT 'seat_' || lower(hex(randomblob(8))), ?, seat_numbers.n, gm.user_id,
+                   CASE WHEN gm.user_id IS NOT NULL THEN 'confirmed' ELSE 'on_bench' END
+            FROM seat_numbers
+            LEFT JOIN group_members gm
+              ON gm.group_id = ? AND gm.default_seat_number = seat_numbers.n
+            """,
+            (group_id, fixture_id, group_id),
+        ),
+    ]
 
     await batch(env, writes)
     fixture = await query_one(env, "SELECT * FROM fixtures WHERE id = ?", fixture_id)
