@@ -11,8 +11,8 @@ INSERT INTO users (id, email, name, auth_provider, auth_provider_id) VALUES
     ('usr_cyd',  'cyd@example.com',  'Cyd',  'apple',  'dev-cyd'),
     ('usr_dev',  'dev@example.com',  'Dev',  'google', 'dev-dev');
 
-INSERT INTO groups (id, name, season_year, total_seats, package_cost_cents, created_by) VALUES
-    ('grp_summit', 'Summit Basecamp', 2026, 4, 480000, 'usr_ada');
+INSERT INTO groups (id, name, season_year, total_seats, package_cost_cents, created_by, invite_code) VALUES
+    ('grp_summit', 'Summit Basecamp', 2026, 4, 480000, 'usr_ada', 'SUMMIT01');
 
 INSERT INTO group_members (group_id, user_id, default_seat_number, role) VALUES
     ('grp_summit', 'usr_ada', 1, 'admin'),

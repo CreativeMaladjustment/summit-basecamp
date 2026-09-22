@@ -22,8 +22,10 @@ router.add("GET", "/api/me", handlers.get_me)
 
 router.add("GET", "/api/groups", handlers.list_groups)
 router.add("POST", "/api/groups", handlers.create_group)
+router.add("POST", "/api/groups/join", handlers.join_group)
 router.add("GET", "/api/groups/{group_id}", handlers.get_group)
 router.add("PATCH", "/api/groups/{group_id}", handlers.update_group)
+router.add("POST", "/api/groups/{group_id}/invite-code/rotate", handlers.rotate_invite_code)
 router.add("GET", "/api/groups/{group_id}/members", handlers.list_members)
 router.add("PATCH", "/api/groups/{group_id}/members/{user_id}", handlers.update_member)
 

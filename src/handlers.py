@@ -10,7 +10,7 @@ import hmac
 import json
 
 from auth import current_user, require_admin, require_membership
-from db import batch, execute, new_id, query, query_one
+from db import batch, execute, new_id, new_invite_code, query, query_one
 from responses import ApiError, binary_response, json_response, read_json, require, require_int
 from splits import net_balances, settle_plan, split_equally
 from storage import get_object, put_object
@@ -89,14 +89,15 @@ async def create_group(request, env, params):
     package_cost_cents = require_int(body, "package_cost_cents", minimum=0)
 
     group_id = new_id("grp")
+    invite_code = new_invite_code()
     await batch(
         env,
         [
             (
                 """
                 INSERT INTO groups
-                    (id, name, season_year, total_seats, package_cost_cents, created_by)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (id, name, season_year, total_seats, package_cost_cents, created_by, invite_code)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     group_id,
@@ -105,6 +106,7 @@ async def create_group(request, env, params):
                     total_seats,
                     package_cost_cents,
                     user["id"],
+                    invite_code,
                 ),
             ),
             (
@@ -133,12 +135,17 @@ async def get_group(request, env, params):
 
 
 async def update_group(request, env, params):
-    """Admin-only: rename the syndicate or change its total package price.
+    """Admin-only: rename the syndicate, change its total package price, or
+    grow/shrink its total seat count.
 
-    total_seats is deliberately not editable here: every existing fixture
-    already has one seat_allocation per seat, and changing the count after
-    the fact would leave them out of sync with the new total -- a separate
-    reconciliation problem from just setting a price.
+    Growing total_seats retrofits every existing fixture with one new
+    on_bench seat_allocation per new seat number -- the same shape
+    create_fixture seeds a brand-new fixture with. Shrinking is only allowed
+    once nothing would be lost by it: refused with 409 if any member's
+    default_seat_number, or any seat_allocation's seat_number, still points
+    above the new total and isn't just sitting on_bench -- reconciling that
+    silently (dropping a confirmed/gifted/resale_listed seat, or a member's
+    default assignment) would destroy state the admin never asked to lose.
     """
     user = await current_user(request, env)
     group_id = params["group_id"]
@@ -157,13 +164,143 @@ async def update_group(request, env, params):
         if "package_cost_cents" in body
         else group["package_cost_cents"]
     )
+    old_total_seats = int(group["total_seats"])
+    total_seats = (
+        require_int(body, "total_seats", minimum=1)
+        if "total_seats" in body
+        else old_total_seats
+    )
+
+    writes = [
+        (
+            "UPDATE groups SET name = ?, package_cost_cents = ?, total_seats = ? WHERE id = ?",
+            (name, package_cost_cents, total_seats, group_id),
+        )
+    ]
+    if total_seats > old_total_seats:
+        writes.extend(
+            await _new_bench_seats(env, group_id, old_total_seats, total_seats)
+        )
+    elif total_seats < old_total_seats:
+        await _require_seats_shrinkable(env, group_id, total_seats)
+        writes.append(
+            (
+                """
+                DELETE FROM seat_allocations
+                WHERE seat_number > ?
+                  AND fixture_id IN (SELECT id FROM fixtures WHERE group_id = ?)
+                """,
+                (total_seats, group_id),
+            )
+        )
+
+    await batch(env, writes)
+    updated = await query_one(env, "SELECT * FROM groups WHERE id = ?", group_id)
+    return json_response({"group": updated})
+
+
+async def _new_bench_seats(env, group_id, old_total_seats, new_total_seats):
+    """Batch-writes seeding one on_bench seat_allocation, for each fixture
+    already in this syndicate, for every seat number the new total adds."""
+    fixtures = await query(env, "SELECT id FROM fixtures WHERE group_id = ?", group_id)
+    writes = []
+    for fixture in fixtures:
+        for seat_number in range(old_total_seats + 1, new_total_seats + 1):
+            writes.append(
+                (
+                    """
+                    INSERT INTO seat_allocations (id, fixture_id, seat_number, status)
+                    VALUES (?, ?, ?, 'on_bench')
+                    """,
+                    (new_id("seat"), fixture["id"], seat_number),
+                )
+            )
+    return writes
+
+
+async def _require_seats_shrinkable(env, group_id, new_total_seats):
+    orphaned_default = await query_one(
+        env,
+        "SELECT 1 FROM group_members WHERE group_id = ? AND default_seat_number > ?",
+        group_id,
+        new_total_seats,
+    )
+    if orphaned_default:
+        raise ApiError(
+            409,
+            "A member's default seat is above the new total_seats -- reassign it first",
+        )
+    still_occupied = await query_one(
+        env,
+        """
+        SELECT 1 FROM seat_allocations s
+        JOIN fixtures f ON f.id = s.fixture_id
+        WHERE f.group_id = ? AND s.seat_number > ? AND s.status != 'on_bench'
+        """,
+        group_id,
+        new_total_seats,
+    )
+    if still_occupied:
+        raise ApiError(
+            409,
+            "A seat above the new total_seats is still confirmed, gifted or listed -- free it first",
+        )
+
+
+async def join_group(request, env, params):
+    """Join an existing syndicate by its invite code.
+
+    Membership starts as a plain 'member' with no default_seat_number, same
+    as anyone else added to a syndicate -- they pick a seat afterward via
+    PATCH /api/groups/{id}/members/{user_id}, the same self-service path an
+    existing member already uses.
+    """
+    user = await current_user(request, env)
+    body = await read_json(request)
+    (raw_code,) = require(body, "invite_code")
+    if not isinstance(raw_code, str):
+        raise ApiError(400, "invite_code must be a string")
+
+    group = await query_one(
+        env, "SELECT * FROM groups WHERE invite_code = ?", raw_code.strip().upper()
+    )
+    if group is None:
+        raise ApiError(404, "Invalid invite code")
+
+    already_a_member = await query_one(
+        env,
+        "SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?",
+        group["id"],
+        user["id"],
+    )
+    if already_a_member:
+        raise ApiError(409, "You are already a member of this syndicate")
 
     await execute(
         env,
-        "UPDATE groups SET name = ?, package_cost_cents = ? WHERE id = ?",
-        name,
-        package_cost_cents,
-        group_id,
+        "INSERT INTO group_members (group_id, user_id, role) VALUES (?, ?, 'member')",
+        group["id"],
+        user["id"],
+    )
+    return json_response(
+        {"group": group, "members": await _members(env, group["id"])}, status=201
+    )
+
+
+async def rotate_invite_code(request, env, params):
+    """Admin-only: replace a syndicate's invite code with a fresh one, so a
+    leaked or no-longer-wanted code stops working without disturbing anyone
+    already in the syndicate."""
+    user = await current_user(request, env)
+    group_id = params["group_id"]
+    await require_admin(env, group_id, user["id"])
+
+    group = await query_one(env, "SELECT * FROM groups WHERE id = ?", group_id)
+    if group is None:
+        raise ApiError(404, "No such syndicate")
+
+    await execute(
+        env, "UPDATE groups SET invite_code = ? WHERE id = ?", new_invite_code(), group_id
     )
     updated = await query_one(env, "SELECT * FROM groups WHERE id = ?", group_id)
     return json_response({"group": updated})

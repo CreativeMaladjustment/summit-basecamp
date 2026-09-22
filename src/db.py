@@ -12,6 +12,12 @@ def new_id(prefix):
     return "{}_{}".format(prefix, uuid.uuid4().hex[:16])
 
 
+def new_invite_code():
+    """A short code a person can actually read aloud and type, unlike the
+    longer, prefixed ids ``new_id`` makes -- e.g. ``4F91A2C8``."""
+    return uuid.uuid4().hex[:8].upper()
+
+
 def _statement(env, sql, params):
     statement = env.DB.prepare(sql)
     if params:
