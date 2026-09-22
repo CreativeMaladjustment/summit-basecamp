@@ -1,9 +1,10 @@
 name: Provision Cloudflare resources
 
-# One-off bootstrap: creates the KV namespace and D1 database that
+# One-off bootstrap: creates the KV namespaces and D1 database that
 # wrangler.jsonc currently references with placeholder ids
-# (REPLACE_WITH_KV_NAMESPACE_ID / REPLACE_WITH_D1_DATABASE_ID), then opens a
-# PR wiring the real ids in. Also creates the Cloudflare Pages project that
+# (REPLACE_WITH_KV_NAMESPACE_ID / REPLACE_WITH_AVATARS_KV_NAMESPACE_ID /
+# REPLACE_WITH_D1_DATABASE_ID), then opens a PR wiring the real ids in.
+# Also creates the Cloudflare Pages project that
 # deploy.yml's "Deploy site" job pushes to — wrangler's own "pages deploy"
 # can normally auto-create a missing project, but that path 10000s
 # (Authentication error) on some accounts, so create it explicitly here
@@ -22,7 +23,7 @@ on:
         required: false
         default: all
         type: choice
-        options: [all, kv, d1, pages]
+        options: [all, kv, avatars-kv, d1, pages]
 
 permissions:
   contents: read
@@ -86,6 +87,43 @@ jobs:
           sed -i "s/REPLACE_WITH_KV_NAMESPACE_ID/$id/" wrangler.jsonc
           echo "created=true" >> "$GITHUB_OUTPUT"
 
+      - name: Create AVATARS KV namespace
+        id: avatars-kv
+        if: inputs.resource == 'all' || inputs.resource == 'avatars-kv'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if ! grep -q 'REPLACE_WITH_AVATARS_KV_NAMESPACE_ID' wrangler.jsonc; then
+            echo "AVATARS KV namespace id already set, skipping."
+            exit 0
+          fi
+
+          # A namespace named AVATARS may already exist from a prior run of
+          # this workflow whose PR hasn't merged yet. Reuse it instead of
+          # creating (and billing for) a duplicate.
+          id="$(npx --no-install wrangler kv namespace list \
+            | jq -r '.[] | select(.title == "AVATARS") | .id' | head -n1 || true)"
+
+          if [ -z "$id" ]; then
+            output="$(npx --no-install wrangler kv namespace create AVATARS)"
+            echo "$output"
+            id="$(printf '%s' "$output" \
+              | grep -oE '"?id"? *[:=] *"[0-9a-f]{32}"' \
+              | grep -oE '[0-9a-f]{32}' | head -n1 || true)"
+          else
+            echo "Reusing existing AVATARS namespace ($id)."
+          fi
+
+          if [ -z "$id" ]; then
+            echo "::error::Could not find the namespace id in Wrangler's output above. Update wrangler.jsonc by hand with the id shown there."
+            exit 1
+          fi
+
+          sed -i "s/REPLACE_WITH_AVATARS_KV_NAMESPACE_ID/$id/" wrangler.jsonc
+          echo "created=true" >> "$GITHUB_OUTPUT"
+
       - name: Create D1 database
         id: d1
         if: inputs.resource == 'all' || inputs.resource == 'd1'
@@ -146,7 +184,7 @@ jobs:
           npx --no-install wrangler pages project create "$name" --production-branch=main
 
       - name: Open a pull request with the real ids
-        if: steps.kv.outputs.created == 'true' || steps.d1.outputs.created == 'true'
+        if: steps.kv.outputs.created == 'true' || steps.avatars-kv.outputs.created == 'true' || steps.d1.outputs.created == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

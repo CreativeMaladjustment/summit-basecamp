@@ -177,46 +177,41 @@ class FakeD1:
 
 
 class FakeKV:
+    """Stand-in for a KV namespace binding -- used for both SESSIONS (plain
+    get/put, string values) and AVATARS (put with metadata, getWithMetadata
+    for binary values), matching what each real binding actually supports.
+    """
+
     def __init__(self, values=None):
         self._values = dict(values or {})
+        self._metadata = {}
 
-    async def get(self, key):
+    async def get(self, key, type=None):
         return self._values.get(key)
 
-    async def put(self, key, value):
+    async def put(self, key, value, options=None):
         self._values[key] = value
-
-
-class FakeR2Object:
-    def __init__(self, data, content_type):
-        self._data = data
-        # storage.get_object reads httpMetadata.contentType the same way it
-        # would off a real R2ObjectBody.
-        self.httpMetadata = types.SimpleNamespace(contentType=content_type)
-
-    async def arrayBuffer(self):
-        # Real code calls .to_py() on what arrayBuffer() returns; here that
-        # is just the bytes already, so to_py() is a no-op accessor.
-        return types.SimpleNamespace(to_py=lambda: self._data)
-
-
-class FakeR2:
-    """Stand-in for an R2 bucket binding (env.AVATARS)."""
-
-    def __init__(self):
-        self._objects = {}
-
-    async def put(self, key, data, options=None):
-        content_type = None
+        metadata = None
         if options:
-            content_type = (options.get("httpMetadata") or {}).get("contentType")
-        self._objects[key] = FakeR2Object(bytes(data), content_type)
+            metadata = options.get("metadata")
+        self._metadata[key] = metadata
 
-    async def get(self, key):
-        return self._objects.get(key)
+    async def getWithMetadata(self, key, type=None):
+        if key not in self._values:
+            return types.SimpleNamespace(value=None, metadata=None)
+        stored = self._values[key]
+        # Real code calls .to_py() on what a KV "arrayBuffer"-typed get
+        # returns; here that's just the bytes already, so to_py() is a
+        # no-op accessor -- matching FakeD1/etc.'s pattern of mimicking the
+        # pyodide-JsProxy shape rather than the real bytes-on-the-wire.
+        value = types.SimpleNamespace(to_py=lambda: stored)
+        metadata = self._metadata.get(key)
+        metadata_obj = types.SimpleNamespace(**metadata) if metadata else None
+        return types.SimpleNamespace(value=value, metadata=metadata_obj)
 
     async def delete(self, key):
-        self._objects.pop(key, None)
+        self._values.pop(key, None)
+        self._metadata.pop(key, None)
 
 
 class FakeRequest:
@@ -252,7 +247,7 @@ def make_env(schema_path, seed_path=None, environment="development", sync_admin_
     return types.SimpleNamespace(
         DB=FakeD1(connection),
         SESSIONS=FakeKV(),
-        AVATARS=FakeR2(),
+        AVATARS=FakeKV(),
         ENVIRONMENT=environment,
         SYNC_ADMIN_TOKEN=sync_admin_token,
     )
