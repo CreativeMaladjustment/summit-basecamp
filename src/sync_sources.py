@@ -56,7 +56,7 @@ NWSL_ROSTER_URL = _team_roster_url(DENVER_SUMMIT_TEAM_ID, DENVER_SUMMIT_TEAM_SLU
 
 WIKIPEDIA_API = "https://en.wikipedia.org/w/api.php"
 # A descriptive User-Agent, as Wikimedia's API etiquette asks for.
-WIKIPEDIA_USER_AGENT = "SquadSeatsSyncBot/1.0 (https://github.com/CreativeMaladjustment/summit-hearth-and-bench)"
+WIKIPEDIA_USER_AGENT = "SquadSeatsSyncBot/1.0 (https://github.com/CreativeMaladjustment/summit-basecamp)"
 
 # Licenses permissive enough to redistribute an image without further
 # clearance. Anything else (including plain "Fair use") is skipped -- public
