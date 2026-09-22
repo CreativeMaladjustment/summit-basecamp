@@ -30,8 +30,10 @@ name: Sync roster
 #     either way, no trailing slash. Update this after the Worker is renamed
 #     (see wrangler.jsonc) -- the old hostname stays reachable, serving
 #     whatever it last deployed, until the old Worker is deleted via
-#     .github/workflows/decommission-cloudflare.yml, so a stale value here
-#     fails silently rather than loudly.
+#     .github/workflows/archive/decommission-cloudflare.yml (move it back
+#     into .github/workflows/ to run it -- GitHub Actions doesn't discover
+#     workflows in subdirectories), so a stale value here fails silently
+#     rather than loudly.
 
 on:
   workflow_run:
