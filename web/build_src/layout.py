@@ -55,20 +55,26 @@ def lockup(size=40, icon_size=21):
 
 def header(open_seats_count):
     # Every screen is pre-rendered from SYNDICATES[0]'s fixtures, seats and
-    # members only, so picking another syndicate here has nothing to switch
-    # to yet — disable rather than leave a control that silently does
-    # nothing. Multi-syndicate rendering is a build_src change, not
-    # something src/app.js can fake at runtime. Only SYNDICATES[0] gets an
-    # option, not the rest of SYNDICATES -- those are placeholder data for a
-    # switcher that doesn't work yet, not real syndicates this member
-    # belongs to, and listing them here would show them as if they were.
+    # members only, so there is nothing yet for a switcher to switch to --
+    # a real one needs live multi-syndicate data (GET /api/groups) behind
+    # sign-in, neither of which this static build has. A disabled <select>
+    # used to stand in for it, but a native select still renders as a live
+    # dropdown (border, chevron) even while disabled, which reads as
+    # broken rather than "not built yet" -- the same reasoning that took
+    # the fake "invited to" cards off the onboarding screen. This is
+    # deliberately plain, non-interactive text instead: the current
+    # syndicate's name, honestly presented as a readout, not a control.
     syn = SYNDICATES[0]
     switcher = h(
-        "select", {"id": "syn-switch", "cls": "select",
-                   "style": {"maxWidth": "100%", "fontWeight": "600", "minHeight": "40px"},
-                   "data-role": "syndicate-switch", "disabled": True,
-                   "title": "Switching syndicates is coming soon"},
-        h("option", {"value": syn["id"], "selected": True}, f'{syn["name"]} — {syn["holds"]}'),
+        "div", {"id": "syn-switch", "cls": "card card--sunk", "role": "group",
+                 "aria-label": "Syndicate", "style": {
+                    "display": "flex", "alignItems": "baseline", "gap": "6px",
+                    "minWidth": "0", "padding": "10px 12px"}},
+        h("strong", {"style": {
+            "fontWeight": "700", "overflow": "hidden", "textOverflow": "ellipsis",
+            "whiteSpace": "nowrap"}}, syn["name"]),
+        h("span", {"style": {"fontSize": "13px", "color": "var(--ink-mute)", "whiteSpace": "nowrap"}},
+          f'— {syn["holds"]}'),
     )
 
     # Only the 14ers ledger is pre-rendered per-season (Matchday/Pitch/Bench
@@ -118,8 +124,7 @@ def header(open_seats_count):
           h("div", {"style": {"display": "flex", "alignItems": "center", "justifyContent": "space-between", "gap": "12px"}},
             lockup(),
             h("div", {"style": {"display": "flex", "gap": "6px", "flex": "none"}}, bell, gear)),
-          h("div", {"style": {"marginTop": "10px"}},
-            h("label", {"cls": "sr-only", "for": "syn-switch"}, "Syndicate"), switcher),
+          h("div", {"style": {"marginTop": "10px"}}, switcher),
           season_row, tabs),
     )
 
