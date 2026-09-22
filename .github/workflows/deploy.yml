@@ -179,11 +179,22 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          # No -e: a nonzero exit here is handled explicitly below, not
-          # treated as this step's own failure until that check runs.
+          # GitHub Actions runs `run:` blocks as `bash -e {0}` regardless of
+          # anything this script itself sets -- so a plain
+          # `output="$(cmd)"; status=$?` would have `-e` kill the step at
+          # that assignment the moment cmd fails, before status=$? or the
+          # echo below ever ran (confirmed against a real failing run: the
+          # step died with no output at all, not even the intended
+          # already-exists check). Putting the assignment in an `if`
+          # condition is bash's documented escape from `-e` -- a command
+          # failing as part of an if/while/until condition, or the left
+          # side of && / ||, never triggers it.
           set -uo pipefail
-          output="$(npx --yes wrangler@4.135.0 r2 bucket create summit-hearth-avatars 2>&1)"
-          status=$?
+          if output="$(npx --yes wrangler@4.135.0 r2 bucket create summit-hearth-avatars 2>&1)"; then
+            status=0
+          else
+            status=$?
+          fi
           echo "$output"
           if [ "$status" -ne 0 ] && ! grep -qi "already exists" <<<"$output"; then
             exit "$status"
