@@ -7,8 +7,7 @@ from __future__ import annotations
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from markup import h, Raw
-from icons import svg
+from markup import h
 from layout import lockup
 from components import badge
 from data import SYNDICATES, TOUCHLINE_NOTES
@@ -72,13 +71,6 @@ def syndicate():
             h("input", {"cls": "input", "id": "invite", "placeholder": "e.g. NORTH-114"}),
             h("button", {"cls": "btn btn--primary btn--block", "type": "button", "style": {"marginTop": "10px"},
                          "data-role": "join-syndicate", "data-syndicate": SYNDICATES[0]["id"]}, "Join with code")),
-          h("p", {"cls": "eyebrow", "style": {"marginTop": "22px"}}, "You've been invited to"),
-          h("div", {"style": {"marginTop": "10px"}},
-            [h("button", {"cls": "path", "type": "button", "data-role": "join-syndicate", "data-syndicate": s["id"]},
-               h("div", {"cls": "path__icon", "style": {"background": "#134E48"}}, Raw(svg("users", size=19, stroke="#fff"))),
-               h("div", None, h("p", {"cls": "path__name", "style": {"margin": "0"}}, s["name"]),
-                 h("p", {"cls": "path__help"}, f'{s["holds"]} · invited by {s["invited_by"]}')))
-             for s in SYNDICATES]),
           h("button", {"cls": "btn btn--ghost btn--block", "type": "button", "style": {"marginTop": "10px"},
                        "data-role": "start-new-syndicate"}, "Start a new syndicate")),
     )
