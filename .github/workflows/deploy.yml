@@ -162,6 +162,26 @@ jobs:
           wranglerVersion: '4.135.0'
           command: deploy
 
+      # Pushes the CF_SYNC_ADMIN_TOKEN GitHub secret to the Worker as its
+      # SYNC_ADMIN_TOKEN secret, so nothing here ever needs `wrangler secret
+      # put` run by hand -- set CF_SYNC_ADMIN_TOKEN once (any random string)
+      # in this "shb" environment and the next deploy carries it over.
+      # Skipped, not failed, until that secret exists, so a repo that
+      # hasn't set it up yet still deploys; POST /api/admin/sync
+      # (src/handlers.trigger_sync) refuses every call in the meantime.
+      - name: Set SYNC_ADMIN_TOKEN secret
+        if: secrets.CF_SYNC_ADMIN_TOKEN != ''
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: ${{ needs.detect.outputs.worker-dir }}
+          wranglerVersion: '4.135.0'
+          secrets: |
+            SYNC_ADMIN_TOKEN
+        env:
+          SYNC_ADMIN_TOKEN: ${{ secrets.CF_SYNC_ADMIN_TOKEN }}
+
   web:
     name: Deploy site
     # Deliberately after the API: the site calls it, so the API should be the

@@ -18,12 +18,15 @@ name: Sync roster
 #
 # Needs two things set once, in the same "shb" GitHub environment deploy.yml
 # uses:
-#   - secret CF_SYNC_ADMIN_TOKEN: any random string. Set the same value on
-#     the Worker with `wrangler secret put SYNC_ADMIN_TOKEN` -- the two must
-#     match exactly, or every run here gets a 401.
-#   - variable CF_API_BASE_URL: the deployed Worker's base URL (its
-#     workers.dev URL, or a custom domain if one is routed to it), no
-#     trailing slash.
+#   - secret CF_SYNC_ADMIN_TOKEN: any random string, e.g. `openssl rand -hex
+#     32`. deploy.yml's "Set SYNC_ADMIN_TOKEN secret" step pushes this same
+#     value to the Worker as SYNC_ADMIN_TOKEN on every deploy -- nothing
+#     else to do, just set the GitHub secret and let the next deploy run.
+#   - variable CF_API_BASE_URL: the deployed Worker's base URL, e.g.
+#     https://summit-hearth-api.<your-subdomain>.workers.dev (the exact
+#     value is on the Worker's Overview page in the Cloudflare dashboard),
+#     or a custom domain if one is routed to it. Include the https://
+#     scheme; no trailing slash.
 
 on:
   workflow_run:
