@@ -1,7 +1,7 @@
-# summit-hearth-and-bench
+# Summit Basecamp
 
 Collaborative season ticket allocation, expense splitting ledger, and daily
-NWSL player flashcards. Cloudflare stack (Pages, Python Workers, D1, KV).
+NWSL player flashcards. Cloudflare stack (Pages, Python Workers, D1, R2, KV).
 
 ## Getting started
 
@@ -23,5 +23,6 @@ See [docs/backend.md](docs/backend.md) for the layout, the endpoint list, the
 data model, and what is deliberately left unimplemented.
 
 Static assets (player headshots, club crests) are committed under
-`frontend/public/assets/images/` and served by Pages; there is no object
-storage bucket in this stack.
+`frontend/public/assets/images/` and served by Pages. Member-uploaded
+profile pictures are the one exception, stored in the `AVATARS` R2 bucket
+(see [docs/backend.md](docs/backend.md)).

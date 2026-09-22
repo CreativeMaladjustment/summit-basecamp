@@ -110,7 +110,7 @@ LEDGER = {
 SETTLE_APPS = [
     {"id": "venmo", "name": "Venmo",
      "link": lambda amount, memo: f"https://venmo.com/?txn=pay&amount={amount}&note={_urlenc(memo)}"},
-    {"id": "cashapp", "name": "Cash App", "link": lambda amount, memo: "https://cash.app/$/summithearthbench"},
+    {"id": "cashapp", "name": "Cash App", "link": lambda amount, memo: "https://cash.app/$/summitbasecamp"},
     {"id": "zelle", "name": "Zelle", "link": lambda amount, memo: "https://www.zellepay.com/"},
 ]
 
@@ -258,8 +258,8 @@ OPPONENTS = [
      "players": []},
 ]
 
-# ---------- Hearthside Notes ----------
-HEARTHSIDE_NOTES = [
+# ---------- Summit Touchline Notes ----------
+TOUCHLINE_NOTES = [
     {"kind": "player", "eyebrow": "Key player to watch", "num": 9, "name": "Yazmeen Ryan",
      "pos": "Forward · Denver Summit FC",
      "body": "Wears the 9 up top for Summit this season. See the Locker Room tab for the full squad."},

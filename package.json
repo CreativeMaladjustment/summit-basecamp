@@ -1,7 +1,7 @@
 {
   "name": "summit-hearth-api",
   "private": true,
-  "description": "Cloudflare Workers backend for Summit Hearth & Bench (SquadSeats)",
+  "description": "Cloudflare Workers backend for Summit Basecamp (SquadSeats)",
   "scripts": {
     "dev": "wrangler dev --env development",
     "deploy": "wrangler deploy",

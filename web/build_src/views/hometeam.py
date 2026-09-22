@@ -22,6 +22,7 @@ def render():
           [h("button", {"cls": "chip", "type": "button", "role": "tab",
                         "aria-selected": "true" if p == "Whole squad" else "false",
                         "data-role": "hometeam-filter", "data-value": p}, p) for p in POSITIONS]),
+        h("p", {"cls": "eyebrow", "style": {"marginTop": "16px"}}, "Peak Tifo"),
         h("div", {"cls": "grid-auto", "style": {"marginTop": "12px", "alignItems": "start"}},
           [player_card(p) for p in SQUAD]),
     )

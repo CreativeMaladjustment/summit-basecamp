@@ -4,7 +4,7 @@ _As of 2026-09-21_
 
 ## Purpose
 
-SquadSeats (internally "Summit Hearth & Bench") is a mobile-first progressive web app (PWA) for a season-ticket syndicate: a small group of fans (a "circle") who co-own a season package for one club (modeled on Denver Summit FC) and need to coordinate who sits in which seat at which fixture, hand off seats they can't use, and split the shared costs fairly.
+SquadSeats (internally "Summit Basecamp") is a mobile-first progressive web app (PWA) for a season-ticket syndicate: a small group of fans (a "circle") who co-own a season package for one club (modeled on Denver Summit FC) and need to coordinate who sits in which seat at which fixture, hand off seats they can't use, and split the shared costs fairly.
 
 The product solves three problems syndicates otherwise track by spreadsheet and group chat:
 
@@ -32,15 +32,15 @@ Sign-in is Google or Apple OIDC (`users.auth_provider`); there is no email/passw
 
 | Screen | Purpose | Backed by |
 | --- | --- | --- |
-| Landing | Hearth & Bench lockup, tonight's Hearthside Notes as teasers, Continue with Google / Apple | `POST /api/auth/session` (OIDC exchange — **not implemented**, returns 501) |
+| Landing | Summit Basecamp lockup, tonight's Summit Touchline notes as teasers, Continue with Google / Apple | `POST /api/auth/session` (OIDC exchange — **not implemented**, returns 501) |
 | Find your syndicate | Join by invite code, see circles you've been invited to, or start a new one | `GET /api/groups`, `POST /api/groups` (creating a syndicate is built; joining an existing one by invite code is **not** — see Open questions) |
-| Matchday | Next Match hero, Hearthside Notes carousel, bench note threads, balance line | `GET /api/groups/{id}/fixtures`, `GET /api/groups/{id}/ledger`, `GET /api/bios/today` |
-| The Pitch | Every home fixture in the season, filtered by All / My Matches / On the Bench | `GET /api/groups/{id}/fixtures`, `GET /api/fixtures/{id}/seats` |
+| Matchday | Next Match hero, Summit Touchline carousel, bench note threads, balance line | `GET /api/groups/{id}/fixtures`, `GET /api/groups/{id}/ledger`, `GET /api/bios/today` |
+| The 14er Pass | Every home fixture in the season, filtered by All / My Matches / On the Bench | `GET /api/groups/{id}/fixtures`, `GET /api/fixtures/{id}/seats` |
 | The Bench | Seats waiting for a sub, plus anything listed on an external resale exchange | `GET /api/groups/{id}/listings` |
-| The Hearth | Package cost, weighted tier split, simplified debts, Settle Up, season history | `GET /api/groups/{id}/ledger`, `POST /api/groups/{id}/expenses`, `POST /api/groups/{id}/settle` |
-| Home Team | Full squad roster with position filters, stats and scouting notes | `GET /api/roster` (frontend still renders from `web/build_src/data.py`, not wired yet) |
+| The 14ers | Package cost, weighted tier split, simplified debts, Settle Up, season history | `GET /api/groups/{id}/ledger`, `POST /api/groups/{id}/expenses`, `POST /api/groups/{id}/settle` |
+| Home Team | Full squad roster with position filters, stats and scouting notes (a "Peak Tifo" visual grid) | `GET /api/roster` (frontend still renders from `web/build_src/data.py`, not wired yet) |
 | Visitors | The visiting club's dressing room: real club/date/venue facts, the most recent meeting's result, real rosters where synced | `GET /api/opponents` (frontend still renders from `web/build_src/data.py`, not wired yet) |
-| Campfire Settings | Push permissions, matchday alerts, Hearthside Notes mix, profile | `GET/PUT /api/preferences` |
+| Campfire Settings | Push permissions, matchday alerts, Summit Touchline notes mix, profile | `GET/PUT /api/preferences` |
 
 ### Seat handoff ("Call a Sub")
 
@@ -48,7 +48,7 @@ A seat holder who can't attend a fixture has three ways to give up their seat, a
 
 1. **Release to the Bench** — posts a note to the circle with an explicit cost choice: *get paid back* at face value, or *on the house* at no cost. Status becomes `on_bench`.
 2. **Send to Guest** — a direct gift to a named guest (`guest_name`); nobody's ledger balance moves. Status becomes `gifted`.
-3. **List Outside the Hearth** — flags the seat as listed on an external exchange (SeatGeek/Ticketmaster) with a `resale_price_cents`. Status becomes `resale_listed`. This is a tracking flag only: SquadSeats has no API integration with any ticketing platform (SeatGeek, Ticketmaster, the club's own app, etc.) — the admin or seat holder must actually transfer or sell the ticket on that platform themselves, outside the app.
+3. **List Outside the 14ers** — flags the seat as listed on an external exchange (SeatGeek/Ticketmaster) with a `resale_price_cents`. Status becomes `resale_listed`. This is a tracking flag only: SquadSeats has no API integration with any ticketing platform (SeatGeek, Ticketmaster, the club's own app, etc.) — the admin or seat holder must actually transfer or sell the ticket on that platform themselves, outside the app.
 
 ### Expense splitting
 
@@ -69,7 +69,7 @@ An expense (`POST /api/groups/{id}/expenses`) writes one `transactions` row per 
 ### Known gaps between design and build
 
 - No push notification delivery (only the underlying "who needs a nudge" logic).
-- No integration with any external ticketing platform (SeatGeek, Ticketmaster, the club's own app) — "List Outside the Hearth" only tracks that a seat is listed; the admin or seat holder handles the actual transfer or sale themselves, outside SquadSeats.
+- No integration with any external ticketing platform (SeatGeek, Ticketmaster, the club's own app) — "List Outside the 14ers" only tracks that a seat is listed; the admin or seat holder handles the actual transfer or sale themselves, outside SquadSeats.
 - Frontend and backend are not yet integrated — the PWA ships with mock data compiled in at build time (`web/build_src/data.py`), even though every screen but Landing and OIDC now has a live endpoint behind it (fixtures, ledger, listings, bios, roster, opponents). Wiring it to the live API (build-time fetch for public data, runtime session-authenticated fetch for per-member data like balances and seat assignments) is the next major milestone.
 
 ## Non-functional requirements
@@ -82,7 +82,7 @@ An expense (`POST /api/groups/{id}/expenses`) writes one `transactions` row per 
 
 ### Accessibility
 
-Tap targets ≥ 44px; toggles are `role="switch"` with `aria-checked`; the Hearthside Notes mix picker is a `radiogroup`; filter chips use a filled selected state rather than relying on `aria-selected` alone. Animation is dropped entirely under `prefers-reduced-motion`.
+Tap targets ≥ 44px; toggles are `role="switch"` with `aria-checked`; the Summit Touchline mix picker is a `radiogroup`; filter chips use a filled selected state rather than relying on `aria-selected` alone. Animation is dropped entirely under `prefers-reduced-motion`.
 
 ### Data & storage
 

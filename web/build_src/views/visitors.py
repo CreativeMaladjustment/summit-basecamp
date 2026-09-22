@@ -45,7 +45,7 @@ def room():
           "AWAY · 5,280 FT"),
         h("h1", {"style": {"fontSize": "22px", "fontWeight": "800", "marginTop": "12px"}}, "The Visiting Club's Dressing Room"),
         h("p", {"style": {"margin": "8px 0 0", "fontSize": "14px", "color": "var(--ink-soft)", "maxWidth": "58ch"}},
-          "Down the tunnel from the Hearth: bare block walls, a bench an inch out of true, and a team sheet taped over last week's. Everything you need on whoever is in town."),
+          "Down the tunnel from Basecamp: bare block walls, a bench an inch out of true, and a team sheet taped over last week's. Everything you need on whoever is in town."),
         h("div", {"style": {"marginTop": "16px", "transform": "rotate(0.4deg)", "background": "var(--surface)",
                              "border": "1px solid var(--hairline-strong)", "padding": "14px", "borderRadius": "4px"}},
           h("p", {"cls": "eyebrow"}, "Team sheet"),

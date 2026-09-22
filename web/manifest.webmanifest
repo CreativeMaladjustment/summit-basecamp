@@ -1,6 +1,6 @@
 {
-  "name": "Summit Hearth & Bench",
-  "short_name": "Hearth & Bench",
+  "name": "Summit Basecamp",
+  "short_name": "Basecamp",
   "description": "Collaborative season-ticket sharing, seat liquidity and expense splitting.",
   "start_url": "./",
   "scope": "./",

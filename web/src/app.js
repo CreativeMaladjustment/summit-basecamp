@@ -536,7 +536,7 @@ function main() {
     }
 
     if (el.dataset.carousel) {
-      const card = el.closest('[data-role="hearthside-carousel"]');
+      const card = el.closest('[data-role="touchline-carousel"]');
       const count = Number(card.dataset.count);
       const current = Number(card.querySelector('[data-carousel-slide]:not([hidden])').dataset.carouselSlide);
       const next = el.dataset.carousel === 'next' ? (current + 1) % count : (current - 1 + count) % count;
@@ -569,7 +569,7 @@ function main() {
     document.getElementById('settle-memo').textContent = memo;
     const links = {
       venmo: `https://venmo.com/?txn=${owed ? 'charge' : 'pay'}&amount=${amount}&note=${encodeURIComponent(memo)}`,
-      cashapp: 'https://cash.app/$/summithearthbench',
+      cashapp: 'https://cash.app/$/summitbasecamp',
       zelle: 'https://www.zellepay.com/',
     };
     for (const [app, href] of Object.entries(links)) {

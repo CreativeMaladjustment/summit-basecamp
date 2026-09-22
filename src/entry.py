@@ -1,4 +1,4 @@
-"""Cloudflare Worker entry point for Summit Hearth & Bench.
+"""Cloudflare Worker entry point for Summit Basecamp.
 
 `on_fetch` serves the JSON API; `on_scheduled` runs the two daily crons
 declared in wrangler.jsonc. The roster/fixture/headshot sync is not one of

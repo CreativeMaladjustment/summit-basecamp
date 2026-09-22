@@ -1,4 +1,4 @@
--- Summit Hearth & Bench — initial D1 schema.
+-- Summit Basecamp — initial D1 schema.
 --
 -- Naming follows the design export: a syndicate is a `group`, a seat for one
 -- fixture is a `seat_allocation`, and every money movement is a row in

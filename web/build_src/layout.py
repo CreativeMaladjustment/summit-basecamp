@@ -9,9 +9,9 @@ from data import SYNDICATES, SEASONS
 
 TABS = [
     ("matchday", "Matchday"),
-    ("pitch", "The Pitch"),
+    ("pitch", "The 14er Pass"),
     ("bench", "The Bench"),
-    ("hearth", "The Hearth"),
+    ("hearth", "The 14ers"),
     ("hometeam", "Home Team"),
     ("visitors", "Visitors"),
 ]
@@ -21,7 +21,7 @@ def head():
     return Raw(
         '<meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">'
-        '<title>Summit Hearth &amp; Bench</title>'
+        '<title>Summit Basecamp</title>'
         '<meta name="description" content="Collaborative season-ticket sharing, seat liquidity and expense splitting for supporter syndicates.">'
         '<meta name="theme-color" content="#134E48" media="(prefers-color-scheme: light)">'
         '<meta name="theme-color" content="#0A1413" media="(prefers-color-scheme: dark)">'
@@ -29,7 +29,7 @@ def head():
         '<link rel="icon" href="./icon.svg" type="image/svg+xml">'
         '<link rel="apple-touch-icon" href="./icon.svg">'
         '<meta name="apple-mobile-web-app-capable" content="yes">'
-        '<meta name="apple-mobile-web-app-title" content="Hearth &amp; Bench">'
+        '<meta name="apple-mobile-web-app-title" content="Summit Basecamp">'
         '<link rel="preconnect" href="https://fonts.googleapis.com">'
         '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
         '<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">'
@@ -48,7 +48,7 @@ def lockup(size=40, icon_size=21):
           Raw(svg("mark", size=icon_size, stroke="#F6BE00"))),
         h("div", {"style": {"minWidth": "0"}},
           h("p", {"style": {"margin": "0", "fontFamily": "var(--font-display)", "fontWeight": "800",
-                             "fontSize": "17px", "letterSpacing": "-.015em"}}, "Hearth & Bench"),
+                             "fontSize": "17px", "letterSpacing": "-.015em"}}, "Summit Basecamp"),
           h("p", {"cls": "eyebrow", "style": {"marginTop": "1px"}}, "Season tickets, shared")),
     )
 
@@ -68,10 +68,11 @@ def header(open_seats_count):
            f'{s["name"]} — {s["holds"]}') for s in SYNDICATES],
     )
 
-    # Only the Hearth ledger is pre-rendered per-season (Matchday/Pitch/Bench
+    # Only the 14ers ledger is pre-rendered per-season (Matchday/Pitch/Bench
     # show the current season's fixtures only), so this only does anything
-    # there — src/app.js hides it outside Hearth rather than implying a
-    # global season switch. Matchday is the default tab, so start hidden.
+    # there — src/app.js hides it outside the 14ers screen rather than
+    # implying a global season switch. Matchday is the default tab, so start
+    # hidden.
     season_row = h(
         "div", {"id": "season-row", "cls": "scroll-row", "style": {"marginTop": "8px"}, "hidden": True,
                  "role": "tablist", "aria-label": "Season"},
