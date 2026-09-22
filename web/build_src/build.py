@@ -73,6 +73,7 @@ def build():
         _, nodes = callasub.build(f)
         sheets.extend(nodes)
     sheets.append(hearth.settle_sheet())
+    sheets.append(landing.new_syndicate_sheet())
 
     app_stage = h(
         "div", {"id": "stage-app", "hidden": True},
