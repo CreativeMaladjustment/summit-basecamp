@@ -54,6 +54,12 @@ from sync_sources import SyncSourceError, fetch_nwsl_roster, fetch_nwsl_schedule
 # normally months apart -- don't collide.
 FIXTURE_REMATCH_WINDOW = datetime.timedelta(days=21)
 
+# See its use in _sync_fixtures: a naive-local kickoff time compared
+# against the Worker's naive-UTC clock can look up to several hours
+# earlier than it really is. 24h comfortably covers any real timezone
+# offset a US-based NWSL venue could produce.
+_KICKOFF_TIMEZONE_SLOP = datetime.timedelta(hours=24)
+
 
 async def run_sync(env):
     """Run every job. Each is independent -- one failing does not stop the
@@ -362,13 +368,30 @@ async def _sync_fixtures(env):
         # never do. Compared against the full kickoff instant, not just the
         # date: a date-only check would still treat today's early match as
         # "upcoming" hours after it had already kicked off.
+        #
+        # kickoff_at is a naive local time (whatever the schedule page
+        # displays, no offset attached -- see fetch_nwsl_schedule) compared
+        # against the Worker's own naive clock, which runs UTC. Those are
+        # not the same instant: a 6:45 PM Mountain Time kickoff is roughly
+        # 00:45 UTC the next day, so a naive comparison against raw UTC
+        # "now" can call it "already kicked off" hours before it truly has.
+        # _KICKOFF_TIMEZONE_SLOP absorbs that gap (comfortably larger than
+        # any real timezone offset a US-based NWSL venue could produce) so
+        # this errs toward still creating a fixture rather than wrongly
+        # skipping a real upcoming one -- the safer of the two mistakes,
+        # since an admin can always remove an accidentally-early fixture,
+        # but a wrongly-skipped one just silently never appears. A full
+        # fix needs the source's real timezone, not just a margin; this
+        # naive-local-vs-UTC gap is a pre-existing limitation elsewhere in
+        # the app too (e.g. src/handlers.py's bench-alert cron), not
+        # something newly introduced here -- see docs/backend.md.
         if not remote["is_home"]:
             continue
         try:
             remote_kickoff = datetime.datetime.fromisoformat(remote["kickoff_at"])
         except ValueError:
             continue
-        if remote_kickoff <= now:
+        if remote_kickoff <= now - _KICKOFF_TIMEZONE_SLOP:
             continue
         remote_year = remote_kickoff.year
         matched_group_ids = {row["group_id"] for row in rows}
@@ -398,39 +421,54 @@ async def _create_fixture_from_sync(env, group, remote):
     INSERT: two sync runs can overlap (a deploy and the weekly schedule, or
     a manual trigger racing either), and without this a second run that
     also finds this group missing this match would insert a duplicate
-    fixture and its own full set of seats. If the insert is ignored because
-    another run already won, changed is 0 and this returns without
-    touching seat_allocations at all -- there is nothing here for it to
-    attach to.
+    fixture and its own full set of seats.
+
+    The fixture insert and every seat insert run in one D1 batch (one
+    atomic transaction), not two separate calls: a Worker interrupted
+    between two separate calls could otherwise leave a fixture row with no
+    seats at all forever, since a fixture already matched by source_ref is
+    only ever updated after that, never re-created to backfill what's
+    missing. Each seat insert is itself an INSERT ... SELECT ... WHERE
+    EXISTS against this fixture_id, not a plain INSERT ... VALUES, so a
+    fixture insert IGNOREd by the race guard above still correctly creates
+    no seats even though every statement in the batch runs regardless of
+    what an earlier one in the same batch did.
     """
     fixture_id = new_id("fix")
-    changed = await execute(
-        env,
-        """
-        INSERT OR IGNORE INTO fixtures
-            (id, group_id, opponent, kickoff_at, venue, tier,
-             weighted_value_cents, source_ref, last_synced_at)
-        VALUES (?, ?, ?, ?, ?, 'standard', 0, ?, DATETIME('now'))
-        """,
-        fixture_id,
-        group["id"],
-        remote["opponent"],
-        remote["kickoff_at"],
-        remote["venue"],
-        remote["source_ref"],
-    )
-    if not changed:
-        return False
-
     writes = [
         (
-            "INSERT INTO seat_allocations (id, fixture_id, seat_number, status) VALUES (?, ?, ?, 'on_bench')",
-            (new_id("seat"), fixture_id, seat_number),
+            """
+            INSERT OR IGNORE INTO fixtures
+                (id, group_id, opponent, kickoff_at, venue, tier,
+                 weighted_value_cents, source_ref, last_synced_at)
+            VALUES (?, ?, ?, ?, ?, 'standard', 0, ?, DATETIME('now'))
+            """,
+            (
+                fixture_id,
+                group["id"],
+                remote["opponent"],
+                remote["kickoff_at"],
+                remote["venue"],
+                remote["source_ref"],
+            ),
         )
-        for seat_number in range(1, int(group["total_seats"]) + 1)
     ]
-    await batch(env, writes)
-    return True
+    for seat_number in range(1, int(group["total_seats"]) + 1):
+        writes.append(
+            (
+                """
+                INSERT INTO seat_allocations (id, fixture_id, seat_number, status)
+                SELECT ?, ?, ?, 'on_bench' WHERE EXISTS (SELECT 1 FROM fixtures WHERE id = ?)
+                """,
+                (new_id("seat"), fixture_id, seat_number, fixture_id),
+            )
+        )
+
+    results = await batch(env, writes)
+    fixture_result = results[0] if results else None
+    meta = getattr(fixture_result, "meta", None) if fixture_result is not None else None
+    changed = (getattr(meta, "changes", 0) or 0) if meta is not None else 0
+    return bool(changed)
 
 
 def _parse_date(kickoff_at):

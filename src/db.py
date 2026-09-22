@@ -54,9 +54,14 @@ async def execute(env, sql, *params):
 async def batch(env, statements):
     """Run several writes in one D1 batch (a single implicit transaction).
 
-    ``statements`` is a list of ``(sql, params)`` tuples.
+    ``statements`` is a list of ``(sql, params)`` tuples. Returns the list
+    of per-statement results D1 hands back, in order, each shaped like a
+    single ``run()`` result (a ``.meta.changes``) -- a caller that needs to
+    know whether one specific statement in the batch actually changed a
+    row, not just that the batch as a whole didn't raise, can check it
+    (see sync._create_fixture_from_sync).
     """
     prepared = [_statement(env, sql, params) for sql, params in statements]
     if not prepared:
-        return
-    await env.DB.batch(prepared)
+        return []
+    return await env.DB.batch(prepared)

@@ -18,9 +18,10 @@ holds the root-relative path to each one, falling back to
 | `migrations/0002_roster.sql` | Home-team squad and opponent dossiers |
 | `migrations/0003_national_team.sql` | National-team caps history for squad players |
 | `migrations/0006_opponent_sync.sql` | Sync tracking columns (`source_ref`, `source_slug`, `match_url`) for opponents/opponent_players, and nullable `opponent_players.jersey_number` |
-| `seed/dev_seed.sql` | Four members, two fixtures, a part-paid ledger, the squad and all 15 opponent dossiers -- dev only, not safe to run against production (see below) |
+| `migrations/0007_fixture_source_ref_unique.sql` | Partial unique index on `fixtures(group_id, source_ref)`, guarding `_create_fixture_from_sync` against two overlapping sync runs both creating the same fixture |
+| `seed/dev_seed.sql` | Four members, two fixtures, a part-paid ledger, the squad and all 15 opponent dossiers -- dev only, not safe to run against production (see below); DELETE-then-INSERT throughout, so rerunning it against the same database is a full reset |
 | `seed/roster_seed.sql` | Just the real home roster, safe to run against production (`wrangler d1 execute ... --remote --file=seed/roster_seed.sql`) as a one-off; the sync job is the ongoing way this table gets updated |
-| `seed/opponents_seed.sql` | All 15 real opponent dossiers, safe to run against production -- **not** just an optional bootstrap like the other two seeds; the sync job never creates an opponent row from nothing, only updates ones this file (or an equivalent) already put there |
+| `seed/opponents_seed.sql` | All 15 real opponent dossiers, safe to run against production -- **not** just an optional bootstrap like the other two seeds; the sync job never creates an opponent row from nothing, only updates ones this file (or an equivalent) already put there. Idempotent (`INSERT ... ON CONFLICT DO UPDATE`, never a DELETE), so rerunning it -- to add a club or fix a typo -- never wipes sync-owned `opponent_players` rows or an admin's hand-edited `form`/`shape_note` |
 | `src/entry.py` | `on_fetch` route table, `on_scheduled` cron jobs |
 | `src/router.py` | Path matching (`/api/groups/{group_id}/fixtures`) |
 | `src/handlers.py` | One function per endpoint, including admin-only `trigger_sync` |
@@ -199,6 +200,33 @@ as the full Wikimedia Commons URL rather than a path under
 either a root-relative asset path (hand-curated) or an `https://` URL
 (synced), and `roster_players.image_attribution` carries the credit line for
 the latter.
+
+### The naive-datetime/timezone gap
+
+`fixtures.kickoff_at` (and the remote kickoff time `fetch_nwsl_schedule`
+parses it from) is a naive local-ish timestamp -- whatever the schedule
+page displays, with no timezone offset attached. The Worker's own clock,
+and SQLite's `DATETIME('now')`, are both naive UTC. Comparing the two
+directly is comparing two different instants that happen to share a
+format: a 6:45 PM Mountain Time kickoff is roughly 00:45 UTC the next day,
+so a naive `remote_kickoff <= now` can call a match "already kicked off"
+up to several hours before it truly has.
+
+This is a pre-existing gap, not something introduced by the sync job --
+the bench-alert cron in `src/handlers.py` (the 10:00 job in the table
+above, finding seats still on the bench three days before kickoff) compares
+`fixtures.kickoff_at` against `DATETIME('now')` the same naive way. Neither
+place has been fully fixed here; a real fix needs each match's actual
+timezone (the source page doesn't provide one) rather than a margin.
+
+`src/sync.py`'s fixture-creation check (`_sync_fixtures`, see its comments)
+mitigates its own instance with `_KICKOFF_TIMEZONE_SLOP`, a 24-hour margin
+comfortably larger than any real offset a US-based NWSL venue could
+produce: it only skips creating a fixture once `remote_kickoff` is more
+than 24 hours in the past by the Worker's clock, deliberately erring toward
+creating a fixture a little early rather than silently missing a real
+upcoming one -- an admin can remove an accidentally-early fixture, but a
+wrongly-skipped one just never appears at all.
 
 ## What is deliberately left out
 

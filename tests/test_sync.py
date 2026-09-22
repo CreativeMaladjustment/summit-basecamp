@@ -486,10 +486,14 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
         fixtures = await sync_query(self.env, "SELECT COUNT(*) AS n FROM fixtures")
         self.assertEqual(fixtures[0]["n"], 0)
 
-    async def test_fixture_sync_does_not_create_for_a_match_that_kicked_off_earlier_today(self):
-        # A date-only comparison would still call today's match "upcoming"
-        # hours after it kicked off; 12:01 AM is past "now" for essentially
-        # any real time of day this test runs.
+    async def test_fixture_sync_still_creates_within_the_kickoff_timezone_slop(self):
+        # kickoff_at is a naive local time compared against the Worker's
+        # naive UTC clock -- a match earlier today can look "already
+        # kicked off" several hours before it truly has (see
+        # sync._KICKOFF_TIMEZONE_SLOP). The deliberate trade-off is to
+        # still create rather than risk wrongly skipping a genuinely
+        # upcoming match: 12:01 AM today is within the slop, so this must
+        # still create.
         today = datetime.date.today()
         await self._seed_group(season_year=today.year)
         html = "<html><body>" + _season_header(today.year) + _schedule_row(
@@ -501,7 +505,7 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
 
         result = await sync._sync_fixtures(self.env)
 
-        self.assertEqual(result["created"], 0)
+        self.assertEqual(result["created"], 1)
 
     async def test_fixture_sync_does_not_create_for_a_group_in_a_different_season(self):
         future = datetime.date.today() + datetime.timedelta(days=30)

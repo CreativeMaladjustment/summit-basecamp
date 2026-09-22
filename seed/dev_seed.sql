@@ -117,6 +117,14 @@ INSERT INTO roster_players (id, team, jersey_number, name, position, stats_json,
 -- halftime_note carries the one real, verifiable fact available -- the
 -- actual result of the most recent meeting -- rather than invented
 -- tactical commentary.
+--
+-- DELETE first, same reasoning as roster_players above: a database that
+-- already ran a previous version of this seed would otherwise collide on
+-- these ids, and opponent_players must go first since it references
+-- opponents by foreign key.
+DELETE FROM opponent_players;
+DELETE FROM opponents;
+
 INSERT INTO opponents (id, club, chip_label, home_date, away_date, away_venue, form, shape_note, halftime_note, quick_stats_json, sort_order, source_ref, source_slug, match_url) VALUES
     ('op_angelcity', 'Angel City', 'Angel City · 10/17', '10/17', '9/11', 'BMO Stadium', NULL, NULL, 'Most recent meeting (9/11): Denver drew 3-3 away.', '[]', 0, '9587b8ce40624165903b6bc9fd252634', 'angel-city-fc', 'https://www.nwslsoccer.com/match/6917097b9b664560a221408c048d4257/angel-city-vs-denver-summit'),
     ('op_bay', 'Bay', 'Bay · 9/16', '9/16', '3/14', 'PayPal Park', NULL, NULL, 'Most recent meeting (9/16): Denver drew 2-2 at home.', '[]', 1, '19674698cec24f53af8866cd21abaf8f', 'bay-fc', 'https://www.nwslsoccer.com/match/205368e46d78455f90a1ee09482ea460/denver-summit-vs-bay'),

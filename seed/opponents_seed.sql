@@ -12,6 +12,19 @@
 -- run once, there is nothing for the sync job to find, and
 -- POST /api/admin/sync's opponent_rosters job does nothing at all.
 --
+-- Idempotent by design, unlike seed/dev_seed.sql's DELETE-then-INSERT: this
+-- file gets run against the live production database, possibly more than
+-- once (e.g. to pick up a newly-added club, or after fixing a typo here).
+-- A DELETE-first approach would wipe opponent_players between runs, but
+-- that table is exclusively sync-owned (src/sync.py's
+-- _sync_opponent_rosters populates it) -- this file must never touch it.
+-- It would also reset any opponent row an admin hand-edited since the last
+-- run. So this uses INSERT ... ON CONFLICT DO UPDATE instead, and
+-- deliberately leaves form/shape_note out of the UPDATE SET clause: those
+-- two columns have no real source yet (see below) and are the columns an
+-- admin is most likely to have filled in by hand once one exists, so a
+-- rerun of this file must not stomp them back to NULL.
+--
 -- Run with:
 --   npx wrangler d1 execute summit-hearth-db --remote --file=seed/opponents_seed.sql
 --
@@ -31,9 +44,6 @@
 -- actual result of the most recent meeting -- rather than invented
 -- tactical commentary.
 
-DELETE FROM opponent_players;
-DELETE FROM opponents;
-
 INSERT INTO opponents (id, club, chip_label, home_date, away_date, away_venue, form, shape_note, halftime_note, quick_stats_json, sort_order, source_ref, source_slug, match_url) VALUES
     ('op_angelcity', 'Angel City', 'Angel City · 10/17', '10/17', '9/11', 'BMO Stadium', NULL, NULL, 'Most recent meeting (9/11): Denver drew 3-3 away.', '[]', 0, '9587b8ce40624165903b6bc9fd252634', 'angel-city-fc', 'https://www.nwslsoccer.com/match/6917097b9b664560a221408c048d4257/angel-city-vs-denver-summit'),
     ('op_bay', 'Bay', 'Bay · 9/16', '9/16', '3/14', 'PayPal Park', NULL, NULL, 'Most recent meeting (9/16): Denver drew 2-2 at home.', '[]', 1, '19674698cec24f53af8866cd21abaf8f', 'bay-fc', 'https://www.nwslsoccer.com/match/205368e46d78455f90a1ee09482ea460/denver-summit-vs-bay'),
@@ -49,4 +59,16 @@ INSERT INTO opponents (id, club, chip_label, home_date, away_date, away_venue, f
     ('op_sandiegowave', 'San Diego Wave', 'San Diego Wave · 8/14', '4/25', '8/14', 'Snapdragon Stadium', NULL, NULL, 'Most recent meeting (8/14): Denver drew 1-1 away.', '[]', 11, 'ca719042b34443c4bcfe380ca4850eaf', 'san-diego-wave-fc', 'https://www.nwslsoccer.com/match/27b3f650634b411487f905b86f033dab/san-diego-wave-vs-denver-summit'),
     ('op_seattlereign', 'Seattle Reign', 'Seattle Reign · 9/19', '9/19', '4/4', 'One Spokane Stadium', NULL, NULL, 'Most recent meeting (9/19): Denver won 2-1 at home.', '[]', 12, '1151140adfc24339ba1c93cb0b6b0238', 'seattle-reign', 'https://www.nwslsoccer.com/match/3cb04ce8aba14af983e19667197c8b43/denver-summit-vs-seattle-reign'),
     ('op_utahroyals', 'Utah Royals', 'Utah Royals · 8/8', '8/8', '5/23', 'America First Field', NULL, NULL, 'Most recent meeting (8/8): Denver won 2-1 at home.', '[]', 13, 'acffc559cf7d485a9c05fa23ab57054b', 'utah-royals-fc', 'https://www.nwslsoccer.com/match/2ab2e7dd4fbb4a52898ea09d1f99cbdf/denver-summit-vs-utah-royals'),
-    ('op_washingtonsp', 'Washington Spirit', 'Washington Spirit · 7/26', '3/28', '7/26', 'Audi Field', NULL, NULL, 'Most recent meeting (7/26): Denver lost 0-1 away.', '[]', 14, 'c31d72afc09f42ee86418633aa41390a', 'washington-spirit', 'https://www.nwslsoccer.com/match/83a606b90fd6443989243fc1e7b160d2/washington-spirit-vs-denver-summit');
+    ('op_washingtonsp', 'Washington Spirit', 'Washington Spirit · 7/26', '3/28', '7/26', 'Audi Field', NULL, NULL, 'Most recent meeting (7/26): Denver lost 0-1 away.', '[]', 14, 'c31d72afc09f42ee86418633aa41390a', 'washington-spirit', 'https://www.nwslsoccer.com/match/83a606b90fd6443989243fc1e7b160d2/washington-spirit-vs-denver-summit')
+ON CONFLICT(id) DO UPDATE SET
+    club = excluded.club,
+    chip_label = excluded.chip_label,
+    home_date = excluded.home_date,
+    away_date = excluded.away_date,
+    away_venue = excluded.away_venue,
+    halftime_note = excluded.halftime_note,
+    quick_stats_json = excluded.quick_stats_json,
+    sort_order = excluded.sort_order,
+    source_ref = excluded.source_ref,
+    source_slug = excluded.source_slug,
+    match_url = excluded.match_url;
