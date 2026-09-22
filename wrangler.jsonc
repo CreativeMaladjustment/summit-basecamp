@@ -38,7 +38,7 @@
   // and a 2 MiB profile picture is well inside KV's 25 MiB per-value limit.
   // Provisioned the same way as SESSIONS and DB: run "Provision Cloudflare
   // resources" (.github/workflows/provision-cloudflare.yml) once, which
-  // replaces the REPLACE_WITH_AVATARS_KV_NAMESPACE_ID placeholder below via
+  // replaces the 95d79e2f781242019deb01157a29cb1b placeholder below via
   // a PR -- no `wrangler kv namespace create` run by hand.
   "kv_namespaces": [
     {
@@ -47,7 +47,7 @@
     },
     {
       "binding": "AVATARS",
-      "id": "REPLACE_WITH_AVATARS_KV_NAMESPACE_ID"
+      "id": "95d79e2f781242019deb01157a29cb1b"
     }
   ],
 
