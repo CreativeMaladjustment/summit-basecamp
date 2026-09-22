@@ -187,6 +187,38 @@ class FakeKV:
         self._values[key] = value
 
 
+class FakeR2Object:
+    def __init__(self, data, content_type):
+        self._data = data
+        # storage.get_object reads httpMetadata.contentType the same way it
+        # would off a real R2ObjectBody.
+        self.httpMetadata = types.SimpleNamespace(contentType=content_type)
+
+    async def arrayBuffer(self):
+        # Real code calls .to_py() on what arrayBuffer() returns; here that
+        # is just the bytes already, so to_py() is a no-op accessor.
+        return types.SimpleNamespace(to_py=lambda: self._data)
+
+
+class FakeR2:
+    """Stand-in for an R2 bucket binding (env.AVATARS)."""
+
+    def __init__(self):
+        self._objects = {}
+
+    async def put(self, key, data, options=None):
+        content_type = None
+        if options:
+            content_type = (options.get("httpMetadata") or {}).get("contentType")
+        self._objects[key] = FakeR2Object(bytes(data), content_type)
+
+    async def get(self, key):
+        return self._objects.get(key)
+
+    async def delete(self, key):
+        self._objects.pop(key, None)
+
+
 class FakeRequest:
     def __init__(self, method="GET", url="http://localhost/", headers=None, body=None):
         self.method = method
@@ -220,6 +252,7 @@ def make_env(schema_path, seed_path=None, environment="development", sync_admin_
     return types.SimpleNamespace(
         DB=FakeD1(connection),
         SESSIONS=FakeKV(),
+        AVATARS=FakeR2(),
         ENVIRONMENT=environment,
         SYNC_ADMIN_TOKEN=sync_admin_token,
     )

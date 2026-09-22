@@ -5,6 +5,7 @@ database standing in for D1. See fake_workers.py.
 """
 
 import asyncio
+import base64
 import json
 import os
 import sys
@@ -136,6 +137,118 @@ class ApiTests(unittest.TestCase):
         status, payload = call(self.env, "GET", "/api/groups/" + group_id)
         self.assertEqual(status, 200)
         self.assertEqual(payload["members"][0]["role"], "admin")
+
+    def test_an_admin_can_set_the_total_package_price(self):
+        status, payload = call(
+            self.env,
+            "PATCH",
+            "/api/groups/grp_summit",
+            body={"package_cost_cents": 500000},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["group"]["package_cost_cents"], 500000)
+
+        status, payload = call(self.env, "GET", "/api/groups/grp_summit")
+        self.assertEqual(payload["group"]["package_cost_cents"], 500000)
+
+    def test_a_non_admin_cannot_set_the_package_price(self):
+        status, _ = call(
+            self.env,
+            "PATCH",
+            "/api/groups/grp_summit",
+            user="usr_bo",
+            body={"package_cost_cents": 500000},
+        )
+        self.assertEqual(status, 403)
+
+    def test_updating_a_group_rejects_an_empty_name(self):
+        status, payload = call(
+            self.env, "PATCH", "/api/groups/grp_summit", body={"name": ""}
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("name", payload["error"])
+
+    def test_a_member_can_edit_their_own_default_seat_number(self):
+        # All 4 of grp_summit's seats already have a default holder (see
+        # seed/dev_seed.sql), so clearing usr_bo's own to null -- rather
+        # than moving it to a number already taken by someone else -- is
+        # the real self-service change available to test here.
+        status, payload = call(
+            self.env,
+            "PATCH",
+            "/api/groups/grp_summit/members/usr_bo",
+            user="usr_bo",
+            body={"default_seat_number": None},
+        )
+        self.assertEqual(status, 200)
+        self.assertIsNone(payload["member"]["default_seat_number"])
+
+    def test_a_member_cannot_edit_someone_elses_seat_number(self):
+        status, _ = call(
+            self.env,
+            "PATCH",
+            "/api/groups/grp_summit/members/usr_cyd",
+            user="usr_bo",
+            body={"default_seat_number": None},
+        )
+        self.assertEqual(status, 403)
+
+    def test_an_admin_can_edit_any_members_default_seat_number(self):
+        # usr_ada (the admin) frees seat 1 first, so reassigning it to
+        # usr_cyd below doesn't collide with usr_ada's own.
+        call(
+            self.env,
+            "PATCH",
+            "/api/groups/grp_summit/members/usr_ada",
+            body={"default_seat_number": None},
+        )
+        status, payload = call(
+            self.env,
+            "PATCH",
+            "/api/groups/grp_summit/members/usr_cyd",
+            body={"default_seat_number": 1},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["member"]["default_seat_number"], 1)
+
+    def test_a_default_seat_number_cannot_collide_with_another_member(self):
+        # usr_ada already holds default seat 1.
+        status, payload = call(
+            self.env,
+            "PATCH",
+            "/api/groups/grp_summit/members/usr_bo",
+            body={"default_seat_number": 1},
+        )
+        self.assertEqual(status, 409)
+
+    def test_a_default_seat_number_cannot_exceed_total_seats(self):
+        status, payload = call(
+            self.env,
+            "PATCH",
+            "/api/groups/grp_summit/members/usr_bo",
+            body={"default_seat_number": 99},
+        )
+        self.assertEqual(status, 400)
+
+    def test_a_member_cannot_change_their_own_role(self):
+        status, _ = call(
+            self.env,
+            "PATCH",
+            "/api/groups/grp_summit/members/usr_bo",
+            user="usr_bo",
+            body={"role": "admin"},
+        )
+        self.assertEqual(status, 403)
+
+    def test_an_admin_can_promote_a_member(self):
+        status, payload = call(
+            self.env,
+            "PATCH",
+            "/api/groups/grp_summit/members/usr_bo",
+            body={"role": "admin"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["member"]["role"], "admin")
 
     def test_a_new_fixture_gets_a_seat_per_member(self):
         status, payload = call(
@@ -306,14 +419,68 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload["seat"]["assigned_user_id"], "usr_bo")
 
     def test_a_holder_cannot_reassign_their_seat_to_someone_else(self):
+        # usr_bo (not an admin) holds seat_002 -- unlike usr_ada, who holds
+        # seat_001 but is also the syndicate admin and so gets the admin
+        # override tested below, a plain holder still cannot do this.
         status, payload = call(
             self.env,
             "PATCH",
-            "/api/seats/seat_001",
-            body={"status": "gifted", "assigned_user_id": "usr_bo"},
+            "/api/seats/seat_002",
+            user="usr_bo",
+            body={"status": "gifted", "assigned_user_id": "usr_cyd"},
         )
         self.assertEqual(status, 200)
-        self.assertEqual(payload["seat"]["assigned_user_id"], "usr_ada")
+        self.assertEqual(payload["seat"]["assigned_user_id"], "usr_bo")
+
+    def test_an_admin_can_reassign_a_seat_held_by_someone_else(self):
+        # seat_002 belongs to usr_bo, not usr_ada -- this is the override a
+        # regular holder (tested above) does not get.
+        status, payload = call(
+            self.env,
+            "PATCH",
+            "/api/seats/seat_002",
+            body={"status": "confirmed", "assigned_user_id": "usr_cyd"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["seat"]["assigned_user_id"], "usr_cyd")
+        self.assertEqual(payload["seat"]["status"], "confirmed")
+
+    def test_an_admin_can_assign_an_unclaimed_seat_to_any_member(self):
+        status, payload = call(
+            self.env,
+            "PATCH",
+            "/api/seats/seat_003",
+            body={"status": "confirmed", "assigned_user_id": "usr_dev"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["seat"]["assigned_user_id"], "usr_dev")
+
+    def test_an_admin_can_bench_a_seat_held_by_someone_else(self):
+        status, payload = call(
+            self.env, "PATCH", "/api/seats/seat_002", body={"status": "on_bench"}
+        )
+        self.assertEqual(status, 200)
+        self.assertIsNone(payload["seat"]["assigned_user_id"])
+
+    def test_an_admin_cannot_assign_a_seat_to_a_non_member(self):
+        status, payload = call(
+            self.env,
+            "PATCH",
+            "/api/seats/seat_003",
+            body={"status": "confirmed", "assigned_user_id": "usr_ghost"},
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("not a member", payload["error"])
+
+    def test_a_non_admin_still_cannot_reassign_someone_elses_seat(self):
+        status, payload = call(
+            self.env,
+            "PATCH",
+            "/api/seats/seat_002",
+            user="usr_cyd",
+            body={"status": "confirmed", "assigned_user_id": "usr_cyd"},
+        )
+        self.assertEqual(status, 403)
 
     def test_a_stale_seat_write_is_rejected_as_a_conflict_not_overwritten(self):
         import handlers
@@ -509,6 +676,77 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 400)
         self.assertIn("daily_bio_scope", payload["error"])
+
+    # --- profile picture ----------------------------------------------------
+
+    def test_a_member_can_upload_and_fetch_their_own_avatar(self):
+        image_bytes = b"\x89PNG\r\n\x1a\n not a real png but non-empty"
+        status, payload = call(
+            self.env,
+            "PUT",
+            "/api/me/avatar",
+            body={
+                "content_type": "image/png",
+                "image_base64": base64.b64encode(image_bytes).decode(),
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["user"]["avatar_url"], "/api/avatars/usr_ada")
+
+        request = FakeRequest(method="GET", url="http://localhost:8787/api/avatars/usr_ada")
+        response = asyncio.run(entry.on_fetch(request, self.env))
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.body, image_bytes)
+        self.assertEqual(response.headers.get("Content-Type"), "image/png")
+
+    def test_fetching_an_avatar_that_was_never_uploaded_is_404(self):
+        request = FakeRequest(method="GET", url="http://localhost:8787/api/avatars/usr_bo")
+        response = asyncio.run(entry.on_fetch(request, self.env))
+        self.assertEqual(response.status, 404)
+
+    def test_an_avatar_upload_rejects_an_unsupported_content_type(self):
+        status, payload = call(
+            self.env,
+            "PUT",
+            "/api/me/avatar",
+            body={"content_type": "image/gif", "image_base64": base64.b64encode(b"x").decode()},
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("content_type", payload["error"])
+
+    def test_an_avatar_upload_rejects_invalid_base64(self):
+        status, payload = call(
+            self.env,
+            "PUT",
+            "/api/me/avatar",
+            body={"content_type": "image/png", "image_base64": "not-valid-base64!!"},
+        )
+        self.assertEqual(status, 400)
+
+    def test_an_avatar_upload_rejects_an_oversized_image(self):
+        oversized = base64.b64encode(b"x" * (2 * 1024 * 1024 + 1)).decode()
+        status, payload = call(
+            self.env,
+            "PUT",
+            "/api/me/avatar",
+            body={"content_type": "image/png", "image_base64": oversized},
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("2 MiB", payload["error"])
+
+    def test_re_uploading_an_avatar_replaces_the_old_one(self):
+        # A different content_type on the second upload too -- proves this
+        # replaces the single stored object rather than leaving an orphaned
+        # copy under the old content type.
+        first = base64.b64encode(b"first-image-bytes").decode()
+        second = base64.b64encode(b"second-image-bytes-here").decode()
+        call(self.env, "PUT", "/api/me/avatar", body={"content_type": "image/png", "image_base64": first})
+        call(self.env, "PUT", "/api/me/avatar", body={"content_type": "image/webp", "image_base64": second})
+
+        request = FakeRequest(method="GET", url="http://localhost:8787/api/avatars/usr_ada")
+        response = asyncio.run(entry.on_fetch(request, self.env))
+        self.assertEqual(response.body, b"second-image-bytes-here")
+        self.assertEqual(response.headers.get("Content-Type"), "image/webp")
 
     # --- roster and opponents -----------------------------------------------
 

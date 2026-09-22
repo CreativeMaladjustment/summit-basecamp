@@ -159,6 +159,24 @@ jobs:
         run: |
           echo "::warning::Migrations exist but no D1 database name was found in the wrangler config. Set the CF_D1_DATABASE repository variable, or name the database in wrangler.toml. Skipping migrations rather than guessing."
 
+      # The AVATARS binding (wrangler.jsonc) needs this bucket to exist
+      # before Deploy Worker can bind to it. `wrangler r2 bucket create`
+      # has no "if not exists" flag, so this tolerates the
+      # already-exists failure on every deploy after the first rather
+      # than trying to check first and race a concurrent deploy. A real
+      # failure (bad credentials, an account without R2 enabled) still
+      # surfaces: the bucket then never gets created, and Deploy Worker
+      # below fails when the binding can't resolve.
+      - name: Create the avatars R2 bucket
+        continue-on-error: true
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: ${{ needs.detect.outputs.worker-dir }}
+          wranglerVersion: '4.135.0'
+          command: r2 bucket create summit-hearth-avatars
+
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
         with:
