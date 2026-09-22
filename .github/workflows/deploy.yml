@@ -161,21 +161,33 @@ jobs:
 
       # The AVATARS binding (wrangler.jsonc) needs this bucket to exist
       # before Deploy Worker can bind to it. `wrangler r2 bucket create`
-      # has no "if not exists" flag, so this tolerates the
-      # already-exists failure on every deploy after the first rather
-      # than trying to check first and race a concurrent deploy. A real
-      # failure (bad credentials, an account without R2 enabled) still
-      # surfaces: the bucket then never gets created, and Deploy Worker
-      # below fails when the binding can't resolve.
+      # has no "if not exists" flag, so this needs to tolerate the
+      # already-exists failure on every deploy after the first -- but only
+      # that one. A blanket `continue-on-error: true` would tolerate a real
+      # failure here too (bad credentials, an account without R2 enabled,
+      # a network blip) exactly as if it were the expected case, reporting
+      # this step green when the bucket was never actually created and
+      # leaving Deploy Worker's later, harder-to-diagnose binding failure
+      # as the only signal something was wrong. So this runs wrangler
+      # directly instead of through the wrangler-action wrapper (which has
+      # no way to inspect the command's own output), and greps that output
+      # for the specific already-exists message before deciding to let a
+      # nonzero exit code pass.
       - name: Create the avatars R2 bucket
-        continue-on-error: true
-        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: ${{ needs.detect.outputs.worker-dir }}
-          wranglerVersion: '4.135.0'
-          command: r2 bucket create summit-hearth-avatars
+        working-directory: ${{ needs.detect.outputs.worker-dir }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          # No -e: a nonzero exit here is handled explicitly below, not
+          # treated as this step's own failure until that check runs.
+          set -uo pipefail
+          output="$(npx --yes wrangler@4.135.0 r2 bucket create summit-hearth-avatars 2>&1)"
+          status=$?
+          echo "$output"
+          if [ "$status" -ne 0 ] && ! grep -qi "already exists" <<<"$output"; then
+            exit "$status"
+          fi
 
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0

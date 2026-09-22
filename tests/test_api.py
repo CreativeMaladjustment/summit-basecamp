@@ -250,6 +250,32 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["member"]["role"], "admin")
 
+    def test_the_only_admin_cannot_be_demoted(self):
+        # usr_ada is grp_summit's sole admin (see seed/dev_seed.sql).
+        # Demoting them would leave nobody who can pass require_admin.
+        status, payload = call(
+            self.env,
+            "PATCH",
+            "/api/groups/grp_summit/members/usr_ada",
+            body={"role": "member"},
+        )
+        self.assertEqual(status, 409)
+
+        status, payload = call(self.env, "GET", "/api/groups/grp_summit/members")
+        ada = next(m for m in payload["members"] if m["id"] == "usr_ada")
+        self.assertEqual(ada["role"], "admin")
+
+    def test_an_admin_can_be_demoted_once_another_admin_exists(self):
+        call(self.env, "PATCH", "/api/groups/grp_summit/members/usr_bo", body={"role": "admin"})
+        status, payload = call(
+            self.env,
+            "PATCH",
+            "/api/groups/grp_summit/members/usr_ada",
+            body={"role": "member"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["member"]["role"], "member")
+
     def test_a_new_fixture_gets_a_seat_per_member(self):
         status, payload = call(
             self.env,
@@ -471,6 +497,18 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 400)
         self.assertIn("not a member", payload["error"])
+
+    def test_an_admin_cannot_bench_a_seat_while_also_assigning_it(self):
+        # A benched seat with a holder would be unclaimable through the
+        # normal claim path, which treats any holder as authoritative.
+        status, payload = call(
+            self.env,
+            "PATCH",
+            "/api/seats/seat_002",
+            body={"status": "on_bench", "assigned_user_id": "usr_bo"},
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("on_bench", payload["error"])
 
     def test_a_non_admin_still_cannot_reassign_someone_elses_seat(self):
         status, payload = call(
@@ -722,6 +760,19 @@ class ApiTests(unittest.TestCase):
             body={"content_type": "image/png", "image_base64": "not-valid-base64!!"},
         )
         self.assertEqual(status, 400)
+
+    def test_an_avatar_upload_rejects_a_non_string_image_base64(self):
+        # A bare int/list/bool would otherwise reach base64.b64decode() and
+        # raise an uncaught TypeError (a 500), not a clean 400.
+        for bad_value in (12345, ["not", "a", "string"], True):
+            status, payload = call(
+                self.env,
+                "PUT",
+                "/api/me/avatar",
+                body={"content_type": "image/png", "image_base64": bad_value},
+            )
+            self.assertEqual(status, 400, "value {!r} should be rejected".format(bad_value))
+            self.assertIn("image_base64", payload["error"])
 
     def test_an_avatar_upload_rejects_an_oversized_image(self):
         oversized = base64.b64encode(b"x" * (2 * 1024 * 1024 + 1)).decode()

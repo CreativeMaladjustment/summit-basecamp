@@ -24,6 +24,11 @@ AVATAR_CONTENT_TYPES = ("image/png", "image/jpeg", "image/webp")
 # A profile picture, not a photo album -- large enough for any real headshot,
 # small enough that base64's ~33% overhead over the wire is a non-issue.
 MAX_AVATAR_BYTES = 2 * 1024 * 1024
+# The longest a base64 string encoding MAX_AVATAR_BYTES can legally be
+# (base64 always expands in groups of 4 output chars per 3 input bytes) --
+# checked against the *encoded* string before decoding it, so an oversized
+# upload is rejected without decoding it first just to measure it.
+MAX_AVATAR_BASE64_CHARS = ((MAX_AVATAR_BYTES + 2) // 3) * 4
 
 
 # --- health and identity ---------------------------------------------------
@@ -188,33 +193,55 @@ async def update_member(request, env, params):
 
     if target_id != user["id"] and not is_admin:
         raise ApiError(403, "Only a syndicate admin can edit another member")
-    await require_membership(env, group_id, target_id)
+    target_membership = await require_membership(env, group_id, target_id)
 
     body = await read_json(request)
-    updates = {}
+    if "default_seat_number" not in body and "role" not in body:
+        raise ApiError(400, "Nothing to update")
 
     if "default_seat_number" in body:
         raw_seat_number = body["default_seat_number"]
         if raw_seat_number is None:
-            seat_number = None
+            await execute(
+                env,
+                "UPDATE group_members SET default_seat_number = NULL WHERE group_id = ? AND user_id = ?",
+                group_id,
+                target_id,
+            )
         else:
             seat_number = require_int(body, "default_seat_number", minimum=1)
             group = await query_one(env, "SELECT total_seats FROM groups WHERE id = ?", group_id)
             if seat_number > int(group["total_seats"]):
                 raise ApiError(400, "default_seat_number exceeds this syndicate's total_seats")
-            taken = await query_one(
+            # The collision guard has to live in the same statement as the
+            # write, not a SELECT beforehand -- two concurrent edits could
+            # otherwise both read "nobody has this seat" and both write,
+            # since nothing stops a second write between the first's check
+            # and its own write. NOT EXISTS re-evaluates as part of this
+            # one atomic UPDATE, so whichever request's write actually lands
+            # first is the only one that can win the seat.
+            changed = await execute(
                 env,
                 """
-                SELECT user_id FROM group_members
-                WHERE group_id = ? AND default_seat_number = ? AND user_id != ?
+                UPDATE group_members
+                SET default_seat_number = ?
+                WHERE group_id = ? AND user_id = ?
+                  AND NOT EXISTS (
+                    SELECT 1 FROM group_members AS other
+                    WHERE other.group_id = ?
+                      AND other.default_seat_number = ?
+                      AND other.user_id != ?
+                  )
                 """,
+                seat_number,
+                group_id,
+                target_id,
                 group_id,
                 seat_number,
                 target_id,
             )
-            if taken:
+            if changed == 0:
                 raise ApiError(409, "That seat is already someone else's default")
-        updates["default_seat_number"] = seat_number
 
     if "role" in body:
         if not is_admin:
@@ -222,19 +249,42 @@ async def update_member(request, env, params):
         role = body["role"]
         if role not in MEMBER_ROLES:
             raise ApiError(400, "role must be one of: " + ", ".join(MEMBER_ROLES))
-        updates["role"] = role
+        if role == "admin" or target_membership.get("role") != "admin":
+            await execute(
+                env,
+                "UPDATE group_members SET role = ? WHERE group_id = ? AND user_id = ?",
+                role,
+                group_id,
+                target_id,
+            )
+        else:
+            # Demoting the syndicate's only admin would leave nobody who
+            # can pass require_admin -- every admin-only endpoint,
+            # including this one's own role field, becomes permanently
+            # unreachable. Guarded the same atomic way as the seat
+            # collision above: the EXISTS check runs as part of the same
+            # UPDATE that would perform the demotion, not a separate SELECT
+            # a concurrent demotion of the *other* admin could race past.
+            changed = await execute(
+                env,
+                """
+                UPDATE group_members
+                SET role = ?
+                WHERE group_id = ? AND user_id = ?
+                  AND EXISTS (
+                    SELECT 1 FROM group_members AS other
+                    WHERE other.group_id = ? AND other.role = 'admin' AND other.user_id != ?
+                  )
+                """,
+                role,
+                group_id,
+                target_id,
+                group_id,
+                target_id,
+            )
+            if changed == 0:
+                raise ApiError(409, "Cannot demote the only remaining admin")
 
-    if not updates:
-        raise ApiError(400, "Nothing to update")
-
-    set_clause = ", ".join("{} = ?".format(field) for field in updates)
-    await execute(
-        env,
-        "UPDATE group_members SET {} WHERE group_id = ? AND user_id = ?".format(set_clause),
-        *updates.values(),
-        group_id,
-        target_id,
-    )
     updated = await query_one(
         env,
         """
@@ -397,6 +447,15 @@ async def update_seat(request, env, params):
     if membership.get("role") == "admin":
         if "assigned_user_id" in body:
             assigned_user_id = body["assigned_user_id"]
+            if assigned_user_id is not None and status == "on_bench":
+                # A benched seat with a holder is a state the rest of this
+                # endpoint doesn't expect: the normal claim path (the
+                # `elif holder:`/`else:` branches below) treats a holder as
+                # authoritative and refuses anyone else, so a seat stuck
+                # here could never be claimed even though list_listings
+                # shows it as available. Reject the conflicting payload
+                # rather than silently picking one field over the other.
+                raise ApiError(400, "assigned_user_id must be null when status is on_bench")
             if assigned_user_id is not None:
                 target = await query_one(
                     env,
@@ -722,9 +781,21 @@ async def upload_avatar(request, env, params):
             400, "content_type must be one of: " + ", ".join(AVATAR_CONTENT_TYPES)
         )
 
+    # Checked before decoding, not after: b64decode() can raise TypeError
+    # for a non-string JSON value (a number, a list) rather than the
+    # binascii/ValueError a malformed string raises, which would otherwise
+    # escape as an uncaught 500. And bounding the *encoded* length up front
+    # rejects an oversized upload without first paying the CPU/memory cost
+    # of decoding all of it just to reject it on the decoded-byte check
+    # below.
+    if not isinstance(image_base64, str):
+        raise ApiError(400, "image_base64 must be a string")
+    if len(image_base64) > MAX_AVATAR_BASE64_CHARS:
+        raise ApiError(400, "Profile pictures are limited to 2 MiB")
+
     try:
         image_bytes = base64.b64decode(image_base64, validate=True)
-    except (binascii.Error, ValueError):
+    except (binascii.Error, ValueError, TypeError):
         raise ApiError(400, "image_base64 is not valid base64")
     if not image_bytes:
         raise ApiError(400, "image_base64 must not be empty")
