@@ -14,14 +14,20 @@ that predate the sync job. This is what lets scraping selectors change
 without orphaning rows: a later run just needs to find the same name once
 more to pick the source_ref back up.
 
-Fixtures are updated in place, never created here -- creating a fixture also
-creates its seat_allocations (see handlers.create_fixture), which is an
-admin decision this job has no business making on its own. So a remote
-fixture with no matching row is skipped, not inserted; only kickoff_at,
-venue and source_ref/last_synced_at change on fixtures this job already
-knows about. Fixtures are scoped per syndicate (group_id), so more than one
-group can each have their own row for the same real-world match -- every
-matching row is updated, not just one.
+Fixtures this job already knows about are only ever updated -- kickoff_at,
+venue and source_ref/last_synced_at -- never their tier or
+weighted_value_cents, which stay an admin's call. Fixtures are scoped per
+syndicate (group_id), so more than one group can each have their own row
+for the same real-world match; every matching row is updated, not just one.
+
+An upcoming *home* match with no matching row in a given group does get a
+new fixture created for that group (every seat starting on the bench,
+unassigned -- see _create_fixture_from_sync), one per group missing it, so
+a newly announced or rescheduled-into-range home game shows up without an
+admin adding it by hand first. Away matches never create a fixture: this
+app only ever sells seats at the home venue, so an away leg has no seat
+package to represent. Neither does a match that has already kicked off --
+there is nothing left to claim on it.
 
 Headshots: since there is no object storage (see docs/backend.md), a
 sync-sourced image is stored as the full Wikimedia Commons URL rather than a
@@ -34,7 +40,7 @@ image_path untouched.
 
 import datetime
 
-from db import execute, new_id, query
+from db import batch, execute, new_id, query
 from sync_sources import SyncSourceError, fetch_nwsl_roster, fetch_nwsl_schedule, fetch_wikipedia_headshot
 
 # How far a fixture's remote kickoff date may drift from what's on file and
@@ -171,7 +177,10 @@ async def _sync_fixtures(env):
             by_ref.setdefault(row["source_ref"], []).append(row)
     unmatched = [row for row in existing if not row["source_ref"]]
 
-    updated = matched = 0
+    groups = await query(env, "SELECT id, total_seats FROM groups")
+    today = datetime.date.today()
+
+    updated = matched = created = 0
     for remote in remote_fixtures:
         rows = by_ref.get(remote["source_ref"])
         if rows is None:
@@ -215,7 +224,65 @@ async def _sync_fixtures(env):
                     "UPDATE fixtures SET last_synced_at = DATETIME('now') WHERE id = ?",
                     row["id"],
                 )
-    return {"matched": matched, "updated": updated, "seen": len(remote_fixtures)}
+
+        # A home match still ahead of kickoff gets a fresh fixture (every
+        # seat unassigned) in every group that doesn't already have a row
+        # for it -- see the module docstring for why away/past matches
+        # never do.
+        if not remote["is_home"]:
+            continue
+        remote_date = _parse_date(remote["kickoff_at"])
+        if remote_date is None or remote_date < today:
+            continue
+        matched_group_ids = {row["group_id"] for row in rows}
+        for group in groups:
+            if group["id"] in matched_group_ids:
+                continue
+            await _create_fixture_from_sync(env, group, remote)
+            created += 1
+
+    return {"matched": matched, "updated": updated, "created": created, "seen": len(remote_fixtures)}
+
+
+async def _create_fixture_from_sync(env, group, remote):
+    """Insert a fixture the sync found with no matching row yet in this
+    group, every seat starting unassigned and on the bench.
+
+    Unlike handlers.create_fixture, this never pre-assigns a member's
+    default seat: that pre-assignment stands in for "this is who normally
+    sits here," which is a reasonable default when an admin deliberately
+    adds a fixture, but not for one this job invented on its own -- nobody
+    has claimed anything on a fixture nobody asked for yet. tier and
+    weighted_value_cents get placeholders (a source page has no idea what
+    your group's package costs); an admin corrects both by hand.
+    """
+    fixture_id = new_id("fix")
+    writes = [
+        (
+            """
+            INSERT INTO fixtures
+                (id, group_id, opponent, kickoff_at, venue, tier,
+                 weighted_value_cents, source_ref, last_synced_at)
+            VALUES (?, ?, ?, ?, ?, 'standard', 0, ?, DATETIME('now'))
+            """,
+            (
+                fixture_id,
+                group["id"],
+                remote["opponent"],
+                remote["kickoff_at"],
+                remote["venue"],
+                remote["source_ref"],
+            ),
+        )
+    ]
+    for seat_number in range(1, int(group["total_seats"]) + 1):
+        writes.append(
+            (
+                "INSERT INTO seat_allocations (id, fixture_id, seat_number, status) VALUES (?, ?, ?, 'on_bench')",
+                (new_id("seat"), fixture_id, seat_number),
+            )
+        )
+    await batch(env, writes)
 
 
 def _parse_date(kickoff_at):

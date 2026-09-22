@@ -6,27 +6,33 @@ parsed result gets reconciled against the database. Every function here
 returns plain dicts/lists -- no D1, no js.Response objects past this module.
 """
 
+import datetime
 import json
 import re
 
 from js import fetch
 
-# Denver Summit's team page on nwslsoccer.com. The schedule tab renders a
-# per-match schema.org SportsEvent block (JSON-LD) for each fixture; that is
-# the only structured data the page exposes, so this scrapes that block
-# rather than the surrounding HTML. If nwslsoccer.com changes its markup and
-# stops emitting JSON-LD, `_extract_json_ld` below returns an empty list and
-# the sync logs a warning instead of failing the whole job -- selectors here
-# are expected to need revisiting; see docs/requirements.md.
-#
-# The roster tab (fetch_nwsl_roster below) is different: verified against a
-# real snapshot of the page on 2026-09-21, it renders no JSON-LD at all --
-# it's a plain Next.js table -- so that one scrapes the table markup
-# directly instead. The slug also used to be missing "-fc"
-# (.../denver-summit/... 404s; the real path is .../denver-summit-fc/...).
+# Denver Summit's team page on nwslsoccer.com. Both the schedule and roster
+# tabs were assumed to render schema.org JSON-LD; verified against real
+# snapshots of both on 2026-09-21/22, neither does -- they're plain
+# server-rendered Next.js markup (a match-list widget and a roster table,
+# respectively), so both scrape that markup directly instead. The slug also
+# used to be missing "-fc" (.../denver-summit/... 404s; the real path is
+# .../denver-summit-fc/...) -- that alone broke every sync regardless of
+# how the response body got parsed.
 NWSL_TEAM_SLUG = "cbfcacbef5bc4a278442c00926ac9ebc/denver-summit-fc"
 NWSL_SCHEDULE_URL = "https://www.nwslsoccer.com/teams/{}/schedule".format(NWSL_TEAM_SLUG)
 NWSL_ROSTER_URL = "https://www.nwslsoccer.com/teams/{}/roster".format(NWSL_TEAM_SLUG)
+
+# The team id nwslsoccer.com uses internally (the first path segment of
+# NWSL_TEAM_SLUG) -- used to tell which side of a match is "us" by id rather
+# than by matching the team name against "denver"/"summit" substrings,
+# which breaks the moment the display name is shortened (the schedule
+# widget renders "Bay" and "Angel City" rather than "Bay FC"/"Angel City
+# FC", so name-sniffing has false negatives even for the away teams; it
+# would have false positives too if some future opponent's name ever
+# contained "denver" or "summit").
+DENVER_SUMMIT_TEAM_ID = NWSL_TEAM_SLUG.split("/")[0]
 
 WIKIPEDIA_API = "https://en.wikipedia.org/w/api.php"
 # A descriptive User-Agent, as Wikimedia's API etiquette asks for.
@@ -36,11 +42,6 @@ WIKIPEDIA_USER_AGENT = "SquadSeatsSyncBot/1.0 (https://github.com/CreativeMaladj
 # clearance. Anything else (including plain "Fair use") is skipped -- public
 # data only, nothing copyrighted, per floutenvy's 2026-09-21 instruction.
 ALLOWED_LICENSE_PREFIXES = ("cc0", "cc-by", "public-domain")
-
-_JSON_LD_RE = re.compile(
-    r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>',
-    re.DOTALL | re.IGNORECASE,
-)
 
 
 class SyncSourceError(Exception):
@@ -75,46 +76,121 @@ def _js_options(options):
     return to_js(options, dict_converter=Object.fromEntries)
 
 
-def _extract_json_ld(html):
-    blocks = []
-    for raw in _JSON_LD_RE.findall(html):
-        try:
-            parsed = json.loads(raw.strip())
-        except ValueError:
-            continue
-        blocks.extend(parsed if isinstance(parsed, list) else [parsed])
-    return blocks
+# One entry per date header or per match start in the schedule's match-list
+# widget, in document order -- a single alternation so a forward scan can
+# track "the date header most recently seen" and attach it to every match
+# that follows, since a match item itself carries no year (only "Saturday,
+# Oct 17") and the date only appears once per date-group header, not
+# repeated on each match.
+_SCHEDULE_MARKER_RE = re.compile(
+    r'd3w-match-list-date">(?P<date>[^<]*)</span>'
+    r'|data-matchid="nwsl::Football_Match::(?P<matchid>[a-f0-9]+)"'
+)
+_SCHEDULE_SEASON_YEAR_RE = re.compile(r'd3w-buttons-head-title">Regular Season (\d{4})</h4>')
+_SCHEDULE_MATCH_URL_RE = re.compile(r'class="d3w-entity-link" href="(https://www\.nwslsoccer\.com/match/[^"]+)"')
+_SCHEDULE_TIME_RE = re.compile(r'd3w-status-wrapper status-date">([^<]*)</span>')
+_SCHEDULE_VENUE_RE = re.compile(r'd3w-item-venue"><span>([^<]*)</span>\s*<span>')
+# Each match item has two of these blocks, home then away or vice versa;
+# non-greedy + DOTALL to skip the crest markup between a team's id/side and
+# its name without needing to model that markup itself.
+_SCHEDULE_TEAM_BLOCK_RE = re.compile(
+    r'data-team-id="nwsl::Football_Team::([a-f0-9]+)"\s+class="[^"]*\b(team-h|team-a)\b[^"]*".*?'
+    r'd3w-team-name-wrap[^"]*"><span>([^<]*)</span>',
+    re.DOTALL,
+)
+
+
+def _parse_kickoff(date_text, time_text, year):
+    # date_text is "Saturday, Oct 17" -- the weekday prefix before the comma
+    # is thrown away since strptime has no use for it once %Y is supplied
+    # separately (the page never puts weekday and month/day in one parseable
+    # token together with a year).
+    _, _, month_day = date_text.partition(", ")
+    if time_text:
+        parsed = datetime.datetime.strptime(
+            "{} {} {}".format(month_day, year, time_text), "%b %d %Y %I:%M %p"
+        )
+    else:
+        # A finished match's row carries no kickoff time widget, only its
+        # date -- close enough for matching an existing fixture by date
+        # (see sync._within_window), and finished matches are never used to
+        # create a new one (see sync._sync_fixtures).
+        parsed = datetime.datetime.strptime("{} {}".format(month_day, year), "%b %d %Y")
+    return parsed.isoformat()
 
 
 async def fetch_nwsl_schedule(env=None):
-    """Denver Summit's upcoming/recent fixtures, from the team schedule page.
+    """Denver Summit's full-season match list, from the team schedule page.
 
     Returns a list of dicts: source_ref, opponent, kickoff_at (ISO 8601),
-    venue, is_home.
+    venue, is_home. Includes finished matches as well as upcoming ones --
+    filtering to what's still ahead is sync.py's job, not this module's.
+
+    The schedule tab renders no JSON-LD (verified against a real snapshot
+    of the page on 2026-09-21) -- it's a plain match-list widget, one <tr>-
+    like item per match -- so this scrapes that markup directly, the same
+    approach fetch_nwsl_roster takes for its page. Raises SyncSourceError
+    on any row this can't fully parse, not just when the whole page yields
+    nothing: see fetch_nwsl_roster's docstring for why a partial result is
+    exactly as dangerous as this looking like a healthy, shorter schedule.
     """
     html = await _get_text(NWSL_SCHEDULE_URL)
+
+    season_year_match = _SCHEDULE_SEASON_YEAR_RE.search(html)
+    if season_year_match is None:
+        raise SyncSourceError("no season year found on the schedule page")
+    season_year = season_year_match.group(1)
+
+    markers = list(_SCHEDULE_MARKER_RE.finditer(html))
+    if not markers:
+        raise SyncSourceError("no matches found on the schedule page")
+
     fixtures = []
-    for block in _extract_json_ld(html):
-        if block.get("@type") != "SportsEvent":
+    unparsed = 0
+    current_date = None
+    for index, marker in enumerate(markers):
+        if marker.group("date") is not None:
+            current_date = marker.group("date")
             continue
-        home = (block.get("homeTeam") or {}).get("name", "")
-        away = (block.get("awayTeam") or {}).get("name", "")
-        is_home = "denver" in home.lower() or "summit" in home.lower()
-        opponent = away if is_home else home
-        if not opponent or not block.get("startDate"):
+        if current_date is None:
+            unparsed += 1
             continue
-        venue = (block.get("location") or {}).get("name", "")
+
+        start = marker.start()
+        end = markers[index + 1].start() if index + 1 < len(markers) else len(html)
+        row = html[start:end]
+
+        url_match = _SCHEDULE_MATCH_URL_RE.search(row)
+        venue_match = _SCHEDULE_VENUE_RE.search(row)
+        teams = _SCHEDULE_TEAM_BLOCK_RE.findall(row)
+        by_side = {side: name for _, side, name in teams}
+        by_team_id = {team_id: side for team_id, side, _ in teams}
+
+        if url_match is None or venue_match is None or set(by_side) != {"team-h", "team-a"}:
+            unparsed += 1
+            continue
+
+        is_home = by_team_id.get(DENVER_SUMMIT_TEAM_ID) == "team-h"
+        opponent = by_side["team-a"] if is_home else by_side["team-h"]
+        time_match = _SCHEDULE_TIME_RE.search(row)
+
         fixtures.append(
             {
-                "source_ref": block.get("url") or "{}-{}".format(opponent, block["startDate"]),
+                "source_ref": url_match.group(1),
                 "opponent": opponent,
-                "kickoff_at": block["startDate"],
-                "venue": venue,
+                "kickoff_at": _parse_kickoff(
+                    current_date, time_match.group(1) if time_match else None, season_year
+                ),
+                "venue": venue_match.group(1),
                 "is_home": is_home,
             }
         )
-    if not fixtures:
-        raise SyncSourceError("no SportsEvent blocks found on the schedule page")
+    if unparsed:
+        raise SyncSourceError(
+            "parsed {} of {} schedule rows -- schedule page markup may have changed".format(
+                len(fixtures), len(fixtures) + unparsed
+            )
+        )
     return fixtures
 
 

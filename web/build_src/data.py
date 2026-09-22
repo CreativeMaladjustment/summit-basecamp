@@ -52,34 +52,33 @@ TIERS = {
     "cup":      {"label": "Cup", "weight": 1.3},
 }
 
+
+# Denver Summit's real remaining 2026 home schedule (transcribed from the
+# official schedule at nwslsoccer.com/teams/cbfcacbef5bc4a278442c00926ac9ebc/
+# denver-summit-fc/schedule, 2026-09-22 snapshot -- src/sync_sources.py
+# fetch_nwsl_schedule reads the same page for the live app). Only two home
+# matches are left this season; every away leg is left out on purpose --
+# this app tracks a season-ticket package at the home venue, and there is
+# no seat package to sell for a match played somewhere else. Kickoff,
+# opponent and venue are real; which syndicate member holds which seat, and
+# what it cost, are still invented -- there is no public source for either,
+# and both are the whole point of the demo.
 FIXTURES = [
-    {"id": "fx_por", "season": 2026, "opponent": "Portland Thorns", "short": "Portland",
-     "kickoff": "2026-09-26T19:30:00", "venue": "Summit Park", "tier": "rivalry", "value_cents": 19000,
+    {"id": "fx_acf", "season": 2026, "opponent": "Angel City", "short": "Angel City",
+     "kickoff": "2026-10-17T18:45:00", "venue": "Centennial Stadium", "tier": "rivalry", "value_cents": 18000,
      "seats": [{"number": 3, "holder": "u_you", "status": "confirmed"},
-               {"number": 4, "holder": "u_sarah", "status": "confirmed"}]},
-    {"id": "fx_bay", "season": 2026, "opponent": "Bay FC", "short": "Bay",
-     "kickoff": "2026-10-03T14:00:00", "venue": "Summit Park", "tier": "standard", "value_cents": 11500,
-     "seats": [{"number": 3, "holder": "u_jason", "status": "confirmed"},
-               {"number": 4, "holder": None, "status": "bench", "bench_note_id": "bn_bay"}]},
-    {"id": "fx_acf", "season": 2026, "opponent": "Angel City FC", "short": "Angel City",
-     "kickoff": "2026-10-18T18:00:00", "venue": "Summit Park", "tier": "rivalry", "value_cents": 18000,
-     "seats": [{"number": 3, "holder": "u_alice", "status": "confirmed"},
                {"number": 4, "holder": None, "status": "listed", "ask_cents": 9500}]},
-    {"id": "fx_utah", "season": 2026, "opponent": "Utah Royals", "short": "Utah",
-     "kickoff": "2026-10-29T19:00:00", "venue": "Summit Park", "tier": "standard", "value_cents": 9500,
-     "seats": [{"number": 3, "holder": None, "status": "bench"},
-               {"number": 4, "holder": None, "status": "bench"}]},
-    {"id": "fx_kc", "season": 2026, "opponent": "Kansas City Current", "short": "KC",
-     "kickoff": "2026-09-12T19:30:00", "venue": "Summit Park", "tier": "standard", "value_cents": 11000,
-     "seats": [{"number": 3, "holder": "u_you", "status": "confirmed"},
-               {"number": 4, "holder": "u_bob", "status": "confirmed"}]},
+    {"id": "fx_rl", "season": 2026, "opponent": "Racing Louisville", "short": "Louisville",
+     "kickoff": "2026-10-24T16:30:00", "venue": "Centennial Stadium", "tier": "standard", "value_cents": 11000,
+     "seats": [{"number": 3, "holder": "u_jason", "status": "confirmed"},
+               {"number": 4, "holder": None, "status": "bench", "bench_note_id": "bn_rl"}]},
 ]
 
 # Thread on a released seat: a note plus replies, not a full chat.
 BENCH_NOTES = [
-    {"id": "bn_bay", "fixture_id": "fx_bay", "seat_number": 4, "author_id": "u_sarah",
-     "posted_at": "2026-09-19T09:12:00", "cost_path": "repay", "amount_cents": 9500,
-     "body": "Out of town for the Bay match — seat 4 is free if anyone wants it.",
+    {"id": "bn_rl", "fixture_id": "fx_rl", "seat_number": 4, "author_id": "u_sarah",
+     "posted_at": "2026-09-19T09:12:00", "cost_path": "repay", "amount_cents": 5500,
+     "body": "Out of town for the Louisville match — seat 4 is free if anyone wants it.",
      "replies": [{"id": "r1", "author_id": "u_jason", "at": "2026-09-19T09:40:00",
                   "body": "We'll miss you — I'll ask my sister."}]},
 ]
@@ -257,6 +256,6 @@ HEARTHSIDE_NOTES = [
      "body": "Wears the 9 up top for Summit this season. See the Locker Room tab for the full squad."},
     {"kind": "tactics", "eyebrow": "Rivalry note", "name": "Portland hold a high line",
      "body": "Portland have not dropped their line all season, and Summit have the two quickest forwards in the league. The game is decided in the twenty yards behind Dara Whitfield."},
-    {"kind": "trivia", "eyebrow": "Tap to reveal", "question": "Summit Park sits at what elevation?",
-     "answer": "5,280 feet — the away sign in the visiting dressing room is not decoration."},
+    {"kind": "trivia", "eyebrow": "Tap to reveal", "question": "What home ground does Denver Summit play at?",
+     "answer": "Centennial Stadium — out in Centennial, Colorado, in the thin air the away sign likes to remind visitors about."},
 ]

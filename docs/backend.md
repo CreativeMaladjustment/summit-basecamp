@@ -127,25 +127,40 @@ pushes that value to the Worker on every deploy, so there is no
 
 `src/sync.py` runs four independent jobs: roster and fixture facts from
 nwslsoccer.com's Denver Summit team pages, and player headshots from
-Wikipedia's API, filtered to CC0/CC-BY/public-domain licenses only. The
-schedule page renders schema.org JSON-LD per fixture, which the fixture and
-opponent jobs scrape; the roster page renders no JSON-LD at all -- it's a
-plain server-rendered table -- so the roster job scrapes that table's
-markup directly instead. See `src/sync_sources.py` for both, and what
-happens if either page's markup changes. Existing rows are matched by
-`source_ref` (falling back to a name match the first time) and only the
-fields that drifted are written, so hand-curated content -- scouting notes,
-stats, dossier prose -- is never overwritten; a field the source came back
-without (a blank position, an empty venue) never blanks out an existing
-value. Fixtures and opponent dossiers are only ever updated, never created,
-by this job: creating a fixture also creates its seat allocations, which
-stays an admin decision. A fixture is scoped to one syndicate (`group_id`),
-so more than one syndicate's fixture row can match the same real-world
-match -- the sync updates every matching row, not just one. A fixture not
-yet matched by `source_ref` is matched by opponent within a 21-day window of
-its kickoff date, wide enough to catch a real reschedule without confusing a
-team's home and away fixtures against the same opponent later in the
-season.
+Wikipedia's API, filtered to CC0/CC-BY/public-domain licenses only. Neither
+the schedule page nor the roster page renders JSON-LD (both were assumed
+to; verified against real snapshots of both on 2026-09-21/22 that neither
+does) -- both are plain server-rendered markup (a match-list widget and a
+roster table), so both jobs scrape that markup directly. See
+`src/sync_sources.py` for both parsers, and what happens if either page's
+markup changes -- each raises rather than returning a partial result if
+even one row fails to parse, since a shorter-but-nonempty result would
+otherwise look like a clean, smaller roster/schedule instead of a broken
+scraper. Existing rows are matched by `source_ref` (falling back to a name
+match the first time) and only the fields that drifted are written, so
+hand-curated content -- scouting notes, stats, dossier prose -- is never
+overwritten; a field the source came back without (a blank position, an
+empty venue) never blanks out an existing value. A fixture is scoped to one
+syndicate (`group_id`), so more than one syndicate's fixture row can match
+the same real-world match -- the sync updates every matching row, not just
+one. A fixture not yet matched by `source_ref` is matched by opponent
+within a 21-day window of its kickoff date, wide enough to catch a real
+reschedule without confusing a team's home and away fixtures against the
+same opponent later in the season.
+
+A home fixture still ahead of kickoff that has no matching row yet in a
+given syndicate gets one created for it there (every seat starting
+unassigned, on the bench), one per syndicate missing it -- unlike
+`handlers.create_fixture`, this never pre-assigns a member's default seat,
+since nobody has claimed anything on a fixture nobody asked for; `tier` and
+`weighted_value_cents` get placeholders (`'standard'`, `0`) for an admin to
+correct, since a source page has no idea what a group's package costs.
+Away fixtures and ones that have already kicked off never create anything:
+this app only ever sells seats at the home venue, and a match already
+played has nothing left to claim. Opponent dossiers are still only ever
+updated, never created here -- the scouting content that makes a dossier
+useful (form, shape, halftime read) has to come from a person, so this job
+only keeps an existing dossier's dates current.
 
 Roster players not seen in a run are marked `active = FALSE` rather than
 deleted, so their stats and national-team history survive a departure;
