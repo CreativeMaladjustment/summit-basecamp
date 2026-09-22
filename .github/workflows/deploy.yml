@@ -159,47 +159,6 @@ jobs:
         run: |
           echo "::warning::Migrations exist but no D1 database name was found in the wrangler config. Set the CF_D1_DATABASE repository variable, or name the database in wrangler.toml. Skipping migrations rather than guessing."
 
-      # The AVATARS binding (wrangler.jsonc) needs this bucket to exist
-      # before Deploy Worker can bind to it. `wrangler r2 bucket create`
-      # has no "if not exists" flag, so this needs to tolerate the
-      # already-exists failure on every deploy after the first -- but only
-      # that one. A blanket `continue-on-error: true` would tolerate a real
-      # failure here too (bad credentials, an account without R2 enabled,
-      # a network blip) exactly as if it were the expected case, reporting
-      # this step green when the bucket was never actually created and
-      # leaving Deploy Worker's later, harder-to-diagnose binding failure
-      # as the only signal something was wrong. So this runs wrangler
-      # directly instead of through the wrangler-action wrapper (which has
-      # no way to inspect the command's own output), and greps that output
-      # for the specific already-exists message before deciding to let a
-      # nonzero exit code pass.
-      - name: Create the avatars R2 bucket
-        working-directory: ${{ needs.detect.outputs.worker-dir }}
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          # GitHub Actions runs `run:` blocks as `bash -e {0}` regardless of
-          # anything this script itself sets -- so a plain
-          # `output="$(cmd)"; status=$?` would have `-e` kill the step at
-          # that assignment the moment cmd fails, before status=$? or the
-          # echo below ever ran (confirmed against a real failing run: the
-          # step died with no output at all, not even the intended
-          # already-exists check). Putting the assignment in an `if`
-          # condition is bash's documented escape from `-e` -- a command
-          # failing as part of an if/while/until condition, or the left
-          # side of && / ||, never triggers it.
-          set -uo pipefail
-          if output="$(npx --yes wrangler@4.135.0 r2 bucket create summit-hearth-avatars 2>&1)"; then
-            status=0
-          else
-            status=$?
-          fi
-          echo "$output"
-          if [ "$status" -ne 0 ] && ! grep -qi "already exists" <<<"$output"; then
-            exit "$status"
-          fi
-
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
         with:

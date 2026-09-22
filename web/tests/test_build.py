@@ -93,9 +93,9 @@ class ViewsRenderCleanly(unittest.TestCase):
     def test_every_view_has_expected_heading(self):
         expectations = {
             "matchday": "Summit vs",
-            "pitch": "The Pitch",
+            "pitch": "The 14er Pass",
             "bench": "The Bench",
-            "hearth": "The Hearth",
+            "hearth": "The 14ers",
             "hometeam": "The Locker Room",
             "visitors": "The Visiting Club",
             "settings": "Campfire Settings",
@@ -147,7 +147,7 @@ class FullPageIntegrity(unittest.TestCase):
         # visibility timeouts in the browser suite, never in a unit test.
         self.assertNotIn("object at 0x", self.page)
         self.assertIn('<meta charset="utf-8">', self.page)
-        self.assertIn("<title>Summit Hearth &amp; Bench</title>", self.page)
+        self.assertIn("<title>Summit Basecamp</title>", self.page)
 
     def test_no_placeholder_leaks_anywhere(self):
         self.assertNotRegex(self.page, LEAK_RE)

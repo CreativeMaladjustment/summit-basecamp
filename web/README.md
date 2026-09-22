@@ -1,4 +1,4 @@
-# Summit Hearth & Bench — PWA
+# Summit Basecamp — PWA
 
 The front end for the season-ticket syndicate app: the screens and flows from
 the `SquadSeats.dc.html` design export, built for real.
@@ -48,22 +48,22 @@ expand target that's referenced actually exists, and so on.
 
 | Screen | What it does |
 | --- | --- |
-| Landing | Hearth & Bench lockup, tonight's Hearthside Notes as teasers, Continue with Google / Apple |
+| Landing | Summit Basecamp lockup, tonight's Summit Touchline notes as teasers, Continue with Google / Apple |
 | Find your syndicate | Invite code, the circles you've been invited to, or start a new one |
-| Matchday | Next Match hero, Hearthside Notes carousel, bench note threads, balance line |
-| The Pitch | Every home fixture in the season, filtered by All / My Matches / On the Bench |
+| Matchday | Next Match hero, Summit Touchline carousel, bench note threads, balance line |
+| The 14er Pass | Every home fixture in the season, filtered by All / My Matches / On the Bench |
 | The Bench | Seats waiting for a sub and anything listed on an external exchange |
-| The Hearth | Package cost, weighted tier split, simplified debts, Settle Up, season history |
-| Home Team | Full squad with position filters, stats and scouting notes |
+| The 14ers | Package cost, weighted tier split, simplified debts, Settle Up, season history |
+| Home Team | Full squad with position filters, stats and scouting notes (a "Peak Tifo" visual grid) |
 | Visitors | The visiting club's dressing room: dossiers, halftime reads, danger flags |
-| Campfire Settings | Push permissions, matchday alerts, Hearthside Notes mix, profile |
+| Campfire Settings | Push permissions, matchday alerts, Summit Touchline notes mix, profile |
 
 Three ways a seat can leave your hands, from the **Call a Sub** sheet:
 
 - **Release to the Bench** — posts a note to the circle with an explicit cost
   choice, either *get paid back* at face value or *on the house* at no cost.
 - **Send to Guest** — a direct gift; nobody's tab moves.
-- **List Outside the Hearth** — flags it for SeatGeek or Ticketmaster.
+- **List Outside the 14ers** — flags it for SeatGeek or Ticketmaster.
 
 ## Layout
 

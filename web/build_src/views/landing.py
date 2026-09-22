@@ -11,7 +11,7 @@ from markup import h, Raw
 from icons import svg
 from layout import lockup
 from components import badge
-from data import SYNDICATES, HEARTHSIDE_NOTES
+from data import SYNDICATES, TOUCHLINE_NOTES
 
 
 def landing():
@@ -26,8 +26,8 @@ def landing():
             "Two seats. Five friends. One ledger nobody argues about."),
           h("p", {"style": {"margin": "12px 0 0", "fontSize": "16px", "color": "var(--ink-soft)"}},
             "Share a season ticket package without the group chat arithmetic. Claim a match, call a sub, and settle up when the season ends."),
-          h("p", {"cls": "eyebrow", "style": {"marginTop": "28px"}}, "Tonight at the Hearth"),
-          h("div", {"style": {"marginTop": "10px"}}, [teaser(n) for n in HEARTHSIDE_NOTES]),
+          h("p", {"cls": "eyebrow", "style": {"marginTop": "28px"}}, "Tonight on the Touchline"),
+          h("div", {"style": {"marginTop": "10px"}}, [teaser(n) for n in TOUCHLINE_NOTES]),
           h("div", {"style": {"marginTop": "24px"}},
             h("button", {"cls": "btn btn--primary btn--block", "type": "button", "data-role": "sign-in", "data-provider": "google"},
               "Continue with Google"),

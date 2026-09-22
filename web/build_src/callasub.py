@@ -48,7 +48,7 @@ def build(fixture):
               "Pings the circle to see who wants to step onto the pitch.", ids["release"]),
         _path("gift", "#1D6960", "Send to Guest",
               "Direct transfer to someone outside the circle. The seat stays accounted for.", ids["guest"]),
-        _path("tag", "#C84B31", "List Outside the Hearth",
+        _path("tag", "#C84B31", "List Outside the 14ers",
               "Flag it for SeatGeek or Ticketmaster at a target face value.", ids["list"]),
         h("button", {"cls": "btn btn--ghost btn--block", "type": "button", "data-close-sheet": "true"}, "Never mind"),
     ])
@@ -95,7 +95,7 @@ def build(fixture):
 
     list_ = sheet_template(ids["list"], [
         h("p", {"cls": "eyebrow"}, f'{fixture["opponent"]} · Seat {seat["number"]}'),
-        h("h2", {"cls": "sheet__title"}, "List Outside the Hearth"),
+        h("h2", {"cls": "sheet__title"}, "List Outside the 14ers"),
         h("p", {"cls": "sheet__sub"}, "Flags the seat as listed on an external exchange. You still handle the listing there."),
         h("label", {"cls": "field__label", "for": f'ask-{seat_key}'}, "Target face value (USD)"),
         h("input", {"cls": "input", "id": f'ask-{seat_key}', "type": "number", "min": "0", "step": "1",

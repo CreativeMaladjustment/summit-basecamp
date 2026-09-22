@@ -762,14 +762,17 @@ async def upload_avatar(request, env, params):
     same read_json() every other handler already uses, and a profile
     picture is small enough that base64's overhead does not matter.
 
-    Written to R2 under a single fixed key per user (no extension) with the
-    content type stored as the object's own httpMetadata, rather than one
+    Written to KV under a single fixed key per user (no extension) with the
+    content type stored as the value's own KV metadata, rather than one
     key per content type -- so re-uploading in a different format replaces
     the old picture outright instead of leaving an orphaned copy behind
-    under its old key. There is still no OTHER object storage in this app
-    (see docs/backend.md); this is its first use, hence its own AVATARS
-    binding rather than folding it into whatever eventually fills the
-    player-headshot gap.
+    under its old key. KV rather than R2 or D1: R2 needs its own one-time
+    account-level enablement in the Cloudflare dashboard before any API
+    token can touch it, where KV is already active on this account
+    (SESSIONS already uses it) -- see wrangler.jsonc's comment on the
+    AVATARS binding. There is still no general object storage in this app
+    (see docs/backend.md); this is its own binding rather than folding it
+    into whatever eventually fills the player-headshot gap.
     """
     user = await current_user(request, env)
     body = await read_json(request)
@@ -811,7 +814,7 @@ async def upload_avatar(request, env, params):
 
 
 async def get_avatar(request, env, params):
-    """Stream a member's uploaded profile picture back out of R2.
+    """Stream a member's uploaded profile picture back out of KV.
 
     Unauthenticated: an avatar is not sensitive, and every other member who
     can already see this user's name in a member list needs to be able to

@@ -31,20 +31,23 @@
   // holds the root-relative path to each one, and this app has no general
   // object storage for that. AVATARS below is the one exception: member
   // profile pictures are user-uploaded at runtime, so they can't be
-  // committed to the repo the way the roster/bio images are. The bucket
-  // itself is created (idempotently) by deploy.yml's "Create the avatars
-  // R2 bucket" step -- no `wrangler r2 bucket create` run by hand.
-  "r2_buckets": [
-    {
-      "binding": "AVATARS",
-      "bucket_name": "summit-hearth-avatars"
-    }
-  ],
-
+  // committed to the repo the way the roster/bio images are. Backed by KV,
+  // not R2: R2 needs its own one-time account-level enablement in the
+  // Cloudflare dashboard before any API token can touch it, where KV is
+  // already active on this account (SESSIONS below already uses it) --
+  // and a 2 MiB profile picture is well inside KV's 25 MiB per-value limit.
+  // Provisioned the same way as SESSIONS and DB: run "Provision Cloudflare
+  // resources" (.github/workflows/provision-cloudflare.yml) once, which
+  // replaces the REPLACE_WITH_AVATARS_KV_NAMESPACE_ID placeholder below via
+  // a PR -- no `wrangler kv namespace create` run by hand.
   "kv_namespaces": [
     {
       "binding": "SESSIONS",
       "id": "ebf7b5e64fd544408b75d882492b2552"
+    },
+    {
+      "binding": "AVATARS",
+      "id": "REPLACE_WITH_AVATARS_KV_NAMESPACE_ID"
     }
   ],
 

@@ -1,7 +1,7 @@
 # Backend
 
 The API is a single Cloudflare Python Worker (`summit-hearth-api`) over D1 for
-data, KV for sessions, and R2 for member-uploaded profile pictures. The PWA is
+data, and KV for both sessions and member-uploaded profile pictures. The PWA is
 deployed separately on Cloudflare Pages and talks to this Worker cross-origin.
 
 Player headshots and club crests still have no object storage behind them --
@@ -10,7 +10,11 @@ they're committed to `frontend/public/assets/images/` and served by Pages;
 back to `/assets/images/players/placeholder-avatar.webp`. Member avatars are
 the exception (see "Profile pictures" below): they're uploaded at runtime, so
 they can't be committed to the repo the way the roster/bio images are, hence
-the one R2 bucket (`AVATARS`).
+the second KV namespace (`AVATARS`). Not R2: R2 needs its own one-time
+account-level enablement in the Cloudflare dashboard before any API token can
+touch it, which cost a broken deploy the first time this was wired up (see
+git history) -- KV was already active on this account via SESSIONS, and a
+profile picture is nowhere near KV's 25 MiB per-value limit.
 
 ## Layout
 
@@ -29,7 +33,7 @@ the one R2 bucket (`AVATARS`).
 | `src/router.py` | Path matching (`/api/groups/{group_id}/fixtures`) |
 | `src/handlers.py` | One function per endpoint, including admin-only `trigger_sync` |
 | `src/db.py` | D1 helpers that hand back plain dicts |
-| `src/storage.py` | R2 helpers for the `AVATARS` bucket (member profile pictures) |
+| `src/storage.py` | KV helpers for the `AVATARS` namespace (member profile pictures) |
 | `src/auth.py` | Bearer token to user, membership and admin checks |
 | `src/splits.py` | Expense-split and settle-up arithmetic |
 | `src/responses.py` | JSON responses, `ApiError`, and `binary_response` for a non-JSON body (an avatar) |
@@ -109,17 +113,17 @@ syndicate).
 ## Profile pictures
 
 `PUT /api/me/avatar` stores the caller's own profile picture in the `AVATARS`
-R2 bucket and points `users.avatar_url` at `GET /api/avatars/{user_id}`, which
-streams it back out. The request body is JSON
+KV namespace and points `users.avatar_url` at `GET /api/avatars/{user_id}`,
+which streams it back out. The request body is JSON
 (`{"content_type", "image_base64"}`), not a raw/multipart upload -- Workers
 Python's body handling is simplest through the same `read_json()` every other
 handler already uses, and a profile picture is small enough (capped at 2 MiB)
 that base64's overhead doesn't matter. `content_type` must be
 `image/png`, `image/jpeg`, or `image/webp`.
 
-Each user has exactly one object in R2, keyed by their id with no extension;
-the content type is stored as the object's own R2 `httpMetadata` rather than
-baked into the key. Re-uploading in a different format replaces the picture
+Each user has exactly one value in KV, keyed by their id with no extension;
+the content type is stored as that value's own KV metadata rather than baked
+into the key. Re-uploading in a different format replaces the picture
 outright instead of leaving an orphaned copy under its old key.
 
 `GET /api/avatars/{user_id}` is deliberately unauthenticated: an avatar isn't

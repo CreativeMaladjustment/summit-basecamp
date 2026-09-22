@@ -1,4 +1,4 @@
-"""The Hearth: package cost, weighted tier split, simplified debts, season
+"""The 14ers: package cost, weighted tier split, simplified debts, season
 history, and the Settle Up sheet. Both seasons' content are pre-rendered
 side by side; src/app.js toggles which season's block is visible.
 """
@@ -18,7 +18,7 @@ from data import MEMBERS, SEASONS, TIERS, LEDGER, FIXTURES, SYNDICATES, ME, SETT
 def render():
     return h(
         "div", {"cls": "view shell", "style": {"paddingTop": "16px"}, "data-tab": "hearth"},
-        h("h1", {"style": {"fontSize": "22px", "fontWeight": "800"}}, "The Hearth"),
+        h("h1", {"style": {"fontSize": "22px", "fontWeight": "800"}}, "The 14ers"),
         h("p", {"style": {"margin": "4px 0 12px", "fontSize": "14px", "color": "var(--ink-mute)"}},
           "What the season costs, who is carrying it, and how to square up."),
         [season_block(y) for y in SEASONS],
@@ -42,7 +42,7 @@ def season_block(year_row):
 
 
 def balance_line(cents, year):
-    text = "All warm at the Hearth." if cents == 0 else (
+    text = "All square with the 14ers." if cents == 0 else (
         f"The circle holds your {money(cents)}." if cents > 0 else f"You hold the tab ({money(abs(cents))})."
     )
     return h(

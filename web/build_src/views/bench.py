@@ -36,7 +36,7 @@ def render(fixtures, bench_notes_by_id):
           "Seats nobody is holding, and anything the circle has listed outside."),
         _section("Waiting for a sub", on_bench, bench_notes_by_id, claimable=True, sid="bench-waiting",
                   extra_cards=[held_seat_listing_card(f, s) for f, s in held_by_me]),
-        _section("Listed outside the Hearth", listed, bench_notes_by_id, claimable=False, sid="bench-listed"),
+        _section("Listed outside the 14ers", listed, bench_notes_by_id, claimable=False, sid="bench-listed"),
         h("p", {"cls": "card", "style": {"color": "var(--ink-mute)"}, "id": "bench-empty",
                 "hidden": bool(on_bench or listed)},
           "The bench is empty — every seat has someone on it."),

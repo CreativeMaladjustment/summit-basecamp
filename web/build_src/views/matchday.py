@@ -1,4 +1,4 @@
-"""Matchday: the next-fixture hero, Hearthside Notes carousel, bench-note
+"""Matchday: the next-fixture hero, Summit Touchline carousel, bench-note
 threads and the balance strip. Every seat state that a claim/release can
 reach is pre-rendered here; src/app.js only toggles which one shows.
 """
@@ -8,7 +8,7 @@ from markup import h, Raw
 from icons import svg
 from components import avatar, badge
 from fmt import money, match_date, match_time, relative
-from data import MEMBERS, ME, HEARTHSIDE_NOTES, QUICK_REPLIES
+from data import MEMBERS, ME, TOUCHLINE_NOTES, QUICK_REPLIES
 from seats import seat_pair, claim_button
 
 
@@ -17,7 +17,7 @@ def render(fixture, bench_notes, my_balance_cents):
         "div", {"cls": "view shell", "style": {"paddingTop": "16px"}, "data-tab": "matchday"},
         h("div", {"cls": "grid-auto", "style": {"gridTemplateColumns": "repeat(auto-fit, minmax(320px, 1fr))"}},
           hero_card(fixture) if fixture else h("div", {"cls": "card"}, "No fixtures left this season."),
-          hearthside_notes_card()),
+          touchline_notes_card()),
         h("section", {"style": {"marginTop": "12px"}, "id": "bench-notes-section",
                        "hidden": not bench_notes},
           h("h2", {"style": {"fontSize": "15px", "margin": "0 0 8px"}}, "Bench notes"),
@@ -57,9 +57,9 @@ def hero_card(f):
     )
 
 
-def hearthside_notes_card():
+def touchline_notes_card():
     slides = []
-    for i, note in enumerate(HEARTHSIDE_NOTES):
+    for i, note in enumerate(TOUCHLINE_NOTES):
         slides.append(h(
             "div", {"style": {"animation": "ssPop .2s ease both"}, "data-carousel-slide": str(i),
                      "hidden": i != 0}, _note_body(note)),
@@ -70,15 +70,15 @@ def hearthside_notes_card():
         [h("span", {"aria-hidden": "true", "data-carousel-dot": str(i), "style": {
             "width": "18px" if i == 0 else "6px", "height": "6px", "borderRadius": "999px",
             "background": "var(--summit-green)" if i == 0 else "var(--hairline-strong)",
-            "transition": "width .2s ease"}}) for i in range(len(HEARTHSIDE_NOTES))],
+            "transition": "width .2s ease"}}) for i in range(len(TOUCHLINE_NOTES))],
     )
 
     return h(
         "article", {"cls": "card", "style": {"display": "flex", "flexDirection": "column"},
-                     "data-role": "hearthside-carousel", "data-count": str(len(HEARTHSIDE_NOTES))},
+                     "data-role": "touchline-carousel", "data-count": str(len(TOUCHLINE_NOTES))},
         h("div", {"style": {"display": "flex", "alignItems": "center", "gap": "8px"}},
           Raw(svg("flame", size=16, stroke="var(--summit-sandstone)")),
-          h("p", {"cls": "eyebrow"}, "Hearthside Notes")),
+          h("p", {"cls": "eyebrow"}, "Summit Touchline")),
         h("div", {"style": {"flex": "1", "marginTop": "10px"}}, slides),
         h("div", {"style": {"display": "flex", "alignItems": "center", "justifyContent": "space-between",
                              "marginTop": "14px", "gap": "10px"}},
@@ -181,7 +181,7 @@ def note_thread(note, all_notes):
 
 
 def balance_strip(cents):
-    line = "All warm at the Hearth." if cents == 0 else (
+    line = "All square with the 14ers." if cents == 0 else (
         f"The circle holds your {money(cents)}." if cents > 0 else f"You hold the tab ({money(abs(cents))})."
     )
     return h(
@@ -189,7 +189,7 @@ def balance_strip(cents):
             "marginTop": "12px", "width": "100%", "textAlign": "left", "cursor": "pointer",
             "borderLeft": "3px solid var(--summit-sunshine)", "display": "flex", "alignItems": "center",
             "justifyContent": "space-between", "gap": "12px"}, "data-role": "goto-hearth"},
-        h("div", None, h("p", {"cls": "eyebrow"}, "The Hearth"),
+        h("div", None, h("p", {"cls": "eyebrow"}, "The 14ers"),
           h("p", {"style": {"margin": "4px 0 0", "fontFamily": "var(--font-display)", "fontWeight": "700", "fontSize": "16px"}}, line)),
         Raw(svg("arrowRight", size=18)),
     )

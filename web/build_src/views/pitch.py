@@ -1,4 +1,4 @@
-"""The Pitch: every home fixture, filtered by All / My Matches / On the
+"""The 14er Pass: every home fixture, filtered by All / My Matches / On the
 Bench. Filtering hides pre-rendered rows by a data attribute — src/app.js
 never rebuilds a row.
 """
@@ -19,7 +19,7 @@ FILTERS = [("all", "All Fixtures"), ("mine", "My Matches"), ("bench", "On the Be
 def render(fixtures):
     return h(
         "div", {"cls": "view shell", "style": {"paddingTop": "16px"}, "data-tab": "pitch"},
-        h("h1", {"style": {"fontSize": "22px", "fontWeight": "800"}}, "The Pitch"),
+        h("h1", {"style": {"fontSize": "22px", "fontWeight": "800"}}, "The 14er Pass"),
         h("p", {"style": {"margin": "4px 0 12px", "fontSize": "14px", "color": "var(--ink-mute)"}},
           "Every home fixture in the season package, in order."),
         h("div", {"cls": "scroll-row", "role": "tablist"},

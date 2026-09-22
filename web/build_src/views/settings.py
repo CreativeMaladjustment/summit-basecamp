@@ -102,7 +102,7 @@ def notes_section():
     ]
     return h(
         "section", {"cls": "card"},
-        h("h2", {"cls": "card__title"}, "Hearthside Notes"),
+        h("h2", {"cls": "card__title"}, "Summit Touchline"),
         h("div", {"cls": "setting-row"},
           h("div", {"cls": "setting-row__body"},
             h("p", {"cls": "setting-row__label"}, "Daily Player Bio & Lore"),
@@ -156,7 +156,7 @@ def preview_section():
         lock_card("🏔️ Match Check-in",
                    "Denver Summit FC vs. Portland Thorns is in 3 days. Are you taking the pitch? [ Confirm Seat ] or [ Call a Sub ]",
                    "preview-checkin-time"),
-        lock_card("⚽ Hearthside Scout",
+        lock_card("⚽ Touchline Scout",
                    "Meet visiting forward Marisol Vega (Portland Thorns) — 3 key stats & tactical tendencies ahead of Saturday's clash.",
                    "preview-bio-time"),
         h("p", {"style": {"margin": "4px 0 0", "fontSize": "12px", "color": "var(--ink-mute)"}, "id": "preview-scope-label"}, ""),
