@@ -130,6 +130,12 @@ jobs:
       && (github.event_name != 'workflow_dispatch' || inputs.target != 'web')
     runs-on: ubuntu-latest
     environment: shb
+    # The `secrets` context isn't available in a step's `if:` (only at
+    # workflow/job level), so whether CF_SYNC_ADMIN_TOKEN is set gets
+    # resolved into this job-level env var instead, which step `if:`s can
+    # read.
+    env:
+      HAS_SYNC_ADMIN_TOKEN: ${{ secrets.CF_SYNC_ADMIN_TOKEN != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -161,6 +167,26 @@ jobs:
           workingDirectory: ${{ needs.detect.outputs.worker-dir }}
           wranglerVersion: '4.135.0'
           command: deploy
+
+      # Pushes the CF_SYNC_ADMIN_TOKEN GitHub secret to the Worker as its
+      # SYNC_ADMIN_TOKEN secret, so nothing here ever needs `wrangler secret
+      # put` run by hand -- set CF_SYNC_ADMIN_TOKEN once (any random string)
+      # in this "shb" environment and the next deploy carries it over.
+      # Skipped, not failed, until that secret exists, so a repo that
+      # hasn't set it up yet still deploys; POST /api/admin/sync
+      # (src/handlers.trigger_sync) refuses every call in the meantime.
+      - name: Set SYNC_ADMIN_TOKEN secret
+        if: env.HAS_SYNC_ADMIN_TOKEN == 'true'
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: ${{ needs.detect.outputs.worker-dir }}
+          wranglerVersion: '4.135.0'
+          secrets: |
+            SYNC_ADMIN_TOKEN
+        env:
+          SYNC_ADMIN_TOKEN: ${{ secrets.CF_SYNC_ADMIN_TOKEN }}
 
   web:
     name: Deploy site

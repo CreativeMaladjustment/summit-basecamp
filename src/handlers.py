@@ -4,12 +4,14 @@ Every handler takes ``(request, env, params)`` and returns a Response.
 ``params`` holds the path parameters the router pulled out of the URL.
 """
 
+import hmac
 import json
 
 from auth import current_user, require_admin, require_membership
 from db import batch, execute, new_id, query, query_one
 from responses import ApiError, json_response, read_json, require, require_int
 from splits import net_balances, settle_plan, split_equally
+from sync import run_sync
 
 SEAT_STATUSES = ("confirmed", "on_bench", "gifted", "resale_listed")
 FIXTURE_TIERS = ("rivalry", "standard", "cup")
@@ -590,3 +592,36 @@ async def update_preferences(request, env, params):
         env, "SELECT * FROM user_notification_prefs WHERE user_id = ?", user["id"]
     )
     return json_response({"preferences": prefs})
+
+
+# --- admin -------------------------------------------------------------
+
+
+async def trigger_sync(request, env, params):
+    """Run the roster/fixture/opponent/headshot sync against nwslsoccer.com
+    and Wikipedia right now, rather than waiting on a schedule.
+
+    There is deliberately no Cloudflare-side cron calling this: it is
+    invoked by .github/workflows/sync-roster.yml, both on every push to
+    main (after the deploy) and on its own weekly schedule, so a run's logs
+    and history live in GitHub Actions with everything else in this repo
+    rather than in the Worker's own (harder to reach) cron log.
+
+    Authenticated by a shared-secret bearer token (the SYNC_ADMIN_TOKEN
+    Worker secret; see `wrangler secret put SYNC_ADMIN_TOKEN`) rather than
+    current_user()/require_membership() -- the caller is a CI job, not a
+    signed-in syndicate member.
+    """
+    expected = getattr(env, "SYNC_ADMIN_TOKEN", None)
+    if not expected:
+        raise ApiError(503, "SYNC_ADMIN_TOKEN is not configured")
+
+    header = request.headers.get("Authorization") or ""
+    token = header[len("Bearer ") :].strip() if header.startswith("Bearer ") else ""
+    # Constant-time compare: a naive == would let a timing attack narrow the
+    # token down a character at a time.
+    if not token or not hmac.compare_digest(token, expected):
+        raise ApiError(401, "Invalid or missing sync admin token")
+
+    summary = await run_sync(env)
+    return json_response({"summary": summary})

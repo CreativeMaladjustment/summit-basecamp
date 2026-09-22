@@ -17,16 +17,18 @@ holds the root-relative path to each one, falling back to
 | `migrations/0001_initial.sql` | The D1 schema |
 | `migrations/0002_roster.sql` | Home-team squad and opponent dossiers |
 | `migrations/0003_national_team.sql` | National-team caps history for squad players |
-| `seed/dev_seed.sql` | Four members, two fixtures, a part-paid ledger, the squad and opponent dossiers |
+| `seed/dev_seed.sql` | Four members, two fixtures, a part-paid ledger, the squad and opponent dossiers -- dev only, not safe to run against production (see below) |
+| `seed/roster_seed.sql` | Just the real roster, safe to run against production (`wrangler d1 execute ... --remote --file=seed/roster_seed.sql`) as a one-off; the sync job is the ongoing way this table gets updated |
 | `src/entry.py` | `on_fetch` route table, `on_scheduled` cron jobs |
 | `src/router.py` | Path matching (`/api/groups/{group_id}/fixtures`) |
-| `src/handlers.py` | One function per endpoint |
+| `src/handlers.py` | One function per endpoint, including admin-only `trigger_sync` |
 | `src/db.py` | D1 helpers that hand back plain dicts |
 | `src/auth.py` | Bearer token to user, membership and admin checks |
 | `src/splits.py` | Expense-split and settle-up arithmetic |
 | `src/responses.py` | JSON responses and `ApiError` |
-| `src/sync.py` | Weekly roster/fixture/headshot sync: diffs external data against D1 and writes what drifted |
+| `src/sync.py` | Roster/fixture/headshot sync: diffs external data against D1 and writes what drifted |
 | `src/sync_sources.py` | Fetching and parsing for the NWSL and Wikipedia sources `sync.py` reconciles against |
+| `.github/workflows/sync-roster.yml` | Triggers the sync via `POST /api/admin/sync`, on deploy and on a weekly schedule |
 
 ## Running it
 
@@ -104,20 +106,33 @@ payer's own share is not written, since nobody owes themselves.
 | --- | --- |
 | `0 8 * * *` | Schedule the next unscheduled player bio for today |
 | `0 10 * * *` | Find seats still on the bench three days before kickoff |
-| `0 5 * * 1` | Sync `roster_players`, `fixtures` and `opponents` against nwslsoccer.com, and headshots against Wikipedia (`src/sync.py`) |
+
+The roster/fixture/headshot sync used to be a third Worker cron here
+(`0 5 * * 1`). It now runs as a GitHub Actions workflow instead --
+`.github/workflows/sync-roster.yml`, on the same weekly schedule plus every
+successful deploy to main -- calling `POST /api/admin/sync`
+(`src/handlers.trigger_sync`) rather than being invoked by
+`on_scheduled`. That trades the "stays behind the existing D1 binding, no
+second deployment path" argument for a run's logs and history living in
+GitHub Actions with everything else in this repo, and for a sync firing
+right after the code or data that feeds it changes rather than waiting up
+to a week for the next cron tick. The admin endpoint is authenticated by a
+shared-secret bearer token (`SYNC_ADMIN_TOKEN` on the Worker), not a
+signed-in user. Set it once as the `CF_SYNC_ADMIN_TOKEN` secret in the
+`shb` GitHub environment -- deploy.yml's "Set SYNC_ADMIN_TOKEN secret" step
+pushes that value to the Worker on every deploy, so there is no
+`wrangler secret put` to run by hand.
 
 ### Roster/fixture/headshot sync
 
-A Worker cron rather than a separate GitHub Actions workflow, since the data
-it reconciles already lives behind this Worker's D1 binding and the two
-existing daily crons already run the same way -- a second deployment path
-(a workflow with its own D1 credentials) would buy nothing here.
-
-`src/sync.py` runs four independent jobs weekly: roster and fixture facts
-from nwslsoccer.com's Denver Summit team pages (JSON-LD embedded in the
-page; see `src/sync_sources.py` for why and what happens if that markup
-changes), and player headshots from Wikipedia's API, filtered to
-CC0/CC-BY/public-domain licenses only. Existing rows are matched by
+`src/sync.py` runs four independent jobs: roster and fixture facts from
+nwslsoccer.com's Denver Summit team pages, and player headshots from
+Wikipedia's API, filtered to CC0/CC-BY/public-domain licenses only. The
+schedule page renders schema.org JSON-LD per fixture, which the fixture and
+opponent jobs scrape; the roster page renders no JSON-LD at all -- it's a
+plain server-rendered table -- so the roster job scrapes that table's
+markup directly instead. See `src/sync_sources.py` for both, and what
+happens if either page's markup changes. Existing rows are matched by
 `source_ref` (falling back to a name match the first time) and only the
 fields that drifted are written, so hand-curated content -- scouting notes,
 stats, dossier prose -- is never overwritten; a field the source came back
