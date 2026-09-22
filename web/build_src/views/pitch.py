@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from markup import h
 from components import badge
-from fmt import money, match_date, match_time
+from fmt import match_date, match_time
 from data import MEMBERS, TIERS, ME
 from seats import seat_avatar_toggle, claim_button, seat_key, is_claimable
 
@@ -77,10 +77,7 @@ def fixture_row(f):
             h("p", {"style": {"margin": "4px 0 0", "fontFamily": "var(--font-display)", "fontWeight": "700", "fontSize": "17px"}},
               f'vs {f["opponent"]}'),
             h("p", {"style": {"margin": "2px 0 0", "fontSize": "13px", "color": "var(--ink-mute)"}}, f["venue"])),
-          h("div", {"style": {"display": "flex", "flexDirection": "column", "alignItems": "flex-end", "gap": "6px"}},
-            badge("Rivalry", "gold") if f["tier"] == "rivalry" else badge(TIERS[f["tier"]]["label"], "mute"),
-            h("span", {"style": {"fontFamily": "var(--font-mono)", "fontSize": "12px", "color": "var(--ink-mute)"}},
-              f'{money(f["value_cents"])} / seat'))),
+          badge("Rivalry", "gold") if f["tier"] == "rivalry" else badge(TIERS[f["tier"]]["label"], "mute")),
         h("div", {"style": {"display": "flex", "alignItems": "center", "gap": "8px", "marginTop": "12px", "flexWrap": "wrap"},
                    "id": f'pitch-status-{f["id"]}'},
           [seat_avatar_toggle(f, s) for s in f["seats"]], status_pill(f)),

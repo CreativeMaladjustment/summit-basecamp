@@ -4,18 +4,31 @@ Every handler takes ``(request, env, params)`` and returns a Response.
 ``params`` holds the path parameters the router pulled out of the URL.
 """
 
+import base64
+import binascii
 import hmac
 import json
 
 from auth import current_user, require_admin, require_membership
 from db import batch, execute, new_id, query, query_one
-from responses import ApiError, json_response, read_json, require, require_int
+from responses import ApiError, binary_response, json_response, read_json, require, require_int
 from splits import net_balances, settle_plan, split_equally
+from storage import get_object, put_object
 from sync import run_sync
 
 SEAT_STATUSES = ("confirmed", "on_bench", "gifted", "resale_listed")
 FIXTURE_TIERS = ("rivalry", "standard", "cup")
 BIO_SCOPES = ("home_first", "summit_only", "league_wide")
+MEMBER_ROLES = ("admin", "member")
+AVATAR_CONTENT_TYPES = ("image/png", "image/jpeg", "image/webp")
+# A profile picture, not a photo album -- large enough for any real headshot,
+# small enough that base64's ~33% overhead over the wire is a non-issue.
+MAX_AVATAR_BYTES = 2 * 1024 * 1024
+# The longest a base64 string encoding MAX_AVATAR_BYTES can legally be
+# (base64 always expands in groups of 4 output chars per 3 input bytes) --
+# checked against the *encoded* string before decoding it, so an oversized
+# upload is rejected without decoding it first just to measure it.
+MAX_AVATAR_BASE64_CHARS = ((MAX_AVATAR_BYTES + 2) // 3) * 4
 
 
 # --- health and identity ---------------------------------------------------
@@ -119,11 +132,171 @@ async def get_group(request, env, params):
     return json_response({"group": group, "members": members})
 
 
+async def update_group(request, env, params):
+    """Admin-only: rename the syndicate or change its total package price.
+
+    total_seats is deliberately not editable here: every existing fixture
+    already has one seat_allocation per seat, and changing the count after
+    the fact would leave them out of sync with the new total -- a separate
+    reconciliation problem from just setting a price.
+    """
+    user = await current_user(request, env)
+    group_id = params["group_id"]
+    await require_admin(env, group_id, user["id"])
+
+    group = await query_one(env, "SELECT * FROM groups WHERE id = ?", group_id)
+    if group is None:
+        raise ApiError(404, "No such syndicate")
+
+    body = await read_json(request)
+    name = body.get("name", group["name"])
+    if not name:
+        raise ApiError(400, "name must not be empty")
+    package_cost_cents = (
+        require_int(body, "package_cost_cents", minimum=0)
+        if "package_cost_cents" in body
+        else group["package_cost_cents"]
+    )
+
+    await execute(
+        env,
+        "UPDATE groups SET name = ?, package_cost_cents = ? WHERE id = ?",
+        name,
+        package_cost_cents,
+        group_id,
+    )
+    updated = await query_one(env, "SELECT * FROM groups WHERE id = ?", group_id)
+    return json_response({"group": updated})
+
+
 async def list_members(request, env, params):
     user = await current_user(request, env)
     group_id = params["group_id"]
     await require_membership(env, group_id, user["id"])
     return json_response({"members": await _members(env, group_id)})
+
+
+async def update_member(request, env, params):
+    """Change a member's default seat assignment -- their profile's "Seat
+    assignment" card -- or, admin only, their role.
+
+    A member may only edit their own default_seat_number. Only an admin can
+    edit another member's, or change anyone's role; this is what lets an
+    admin move seats around the syndicate rather than each member being
+    stuck with whatever they picked first.
+    """
+    user = await current_user(request, env)
+    group_id = params["group_id"]
+    target_id = params["user_id"]
+    membership = await require_membership(env, group_id, user["id"])
+    is_admin = membership.get("role") == "admin"
+
+    if target_id != user["id"] and not is_admin:
+        raise ApiError(403, "Only a syndicate admin can edit another member")
+    target_membership = await require_membership(env, group_id, target_id)
+
+    body = await read_json(request)
+    if "default_seat_number" not in body and "role" not in body:
+        raise ApiError(400, "Nothing to update")
+
+    if "default_seat_number" in body:
+        raw_seat_number = body["default_seat_number"]
+        if raw_seat_number is None:
+            await execute(
+                env,
+                "UPDATE group_members SET default_seat_number = NULL WHERE group_id = ? AND user_id = ?",
+                group_id,
+                target_id,
+            )
+        else:
+            seat_number = require_int(body, "default_seat_number", minimum=1)
+            group = await query_one(env, "SELECT total_seats FROM groups WHERE id = ?", group_id)
+            if seat_number > int(group["total_seats"]):
+                raise ApiError(400, "default_seat_number exceeds this syndicate's total_seats")
+            # The collision guard has to live in the same statement as the
+            # write, not a SELECT beforehand -- two concurrent edits could
+            # otherwise both read "nobody has this seat" and both write,
+            # since nothing stops a second write between the first's check
+            # and its own write. NOT EXISTS re-evaluates as part of this
+            # one atomic UPDATE, so whichever request's write actually lands
+            # first is the only one that can win the seat.
+            changed = await execute(
+                env,
+                """
+                UPDATE group_members
+                SET default_seat_number = ?
+                WHERE group_id = ? AND user_id = ?
+                  AND NOT EXISTS (
+                    SELECT 1 FROM group_members AS other
+                    WHERE other.group_id = ?
+                      AND other.default_seat_number = ?
+                      AND other.user_id != ?
+                  )
+                """,
+                seat_number,
+                group_id,
+                target_id,
+                group_id,
+                seat_number,
+                target_id,
+            )
+            if changed == 0:
+                raise ApiError(409, "That seat is already someone else's default")
+
+    if "role" in body:
+        if not is_admin:
+            raise ApiError(403, "Only a syndicate admin can change a member's role")
+        role = body["role"]
+        if role not in MEMBER_ROLES:
+            raise ApiError(400, "role must be one of: " + ", ".join(MEMBER_ROLES))
+        if role == "admin" or target_membership.get("role") != "admin":
+            await execute(
+                env,
+                "UPDATE group_members SET role = ? WHERE group_id = ? AND user_id = ?",
+                role,
+                group_id,
+                target_id,
+            )
+        else:
+            # Demoting the syndicate's only admin would leave nobody who
+            # can pass require_admin -- every admin-only endpoint,
+            # including this one's own role field, becomes permanently
+            # unreachable. Guarded the same atomic way as the seat
+            # collision above: the EXISTS check runs as part of the same
+            # UPDATE that would perform the demotion, not a separate SELECT
+            # a concurrent demotion of the *other* admin could race past.
+            changed = await execute(
+                env,
+                """
+                UPDATE group_members
+                SET role = ?
+                WHERE group_id = ? AND user_id = ?
+                  AND EXISTS (
+                    SELECT 1 FROM group_members AS other
+                    WHERE other.group_id = ? AND other.role = 'admin' AND other.user_id != ?
+                  )
+                """,
+                role,
+                group_id,
+                target_id,
+                group_id,
+                target_id,
+            )
+            if changed == 0:
+                raise ApiError(409, "Cannot demote the only remaining admin")
+
+    updated = await query_one(
+        env,
+        """
+        SELECT u.id, u.name, u.email, u.avatar_url, m.role, m.default_seat_number
+        FROM group_members m
+        JOIN users u ON u.id = m.user_id
+        WHERE m.group_id = ? AND m.user_id = ?
+        """,
+        group_id,
+        target_id,
+    )
+    return json_response({"member": updated})
 
 
 async def _members(env, group_id):
@@ -246,8 +419,14 @@ async def update_seat(request, env, params):
     A seat with no holder can only be claimed (set to 'confirmed', for the
     caller themselves): a member cannot gift or resell a seat they have not
     first taken, and cannot assign a seat to anyone but themselves -- this
-    endpoint has no transfer flow. A seat with a holder can only be changed by
-    that holder.
+    endpoint has no transfer flow for a regular member. A seat with a holder
+    can only be changed by that holder.
+
+    A syndicate admin is the exception to both: they can set any seat's
+    status and reassign it to any member of the syndicate (or bench it),
+    regardless of who currently holds it -- this is the admin override that
+    lets them fix a seat nobody involved can, e.g. reassigning a seat whose
+    holder left the syndicate.
     """
     user = await current_user(request, env)
     body = await read_json(request)
@@ -257,14 +436,40 @@ async def update_seat(request, env, params):
     )
     if seat is None:
         raise ApiError(404, "No such seat")
-    await _fixture_for_member(env, seat["fixture_id"], user["id"])
+    fixture = await _fixture_for_member(env, seat["fixture_id"], user["id"])
 
     holder = seat["assigned_user_id"]
     status = body.get("status", seat["status"])
     if status not in SEAT_STATUSES:
         raise ApiError(400, "status must be one of: " + ", ".join(SEAT_STATUSES))
 
-    if holder:
+    membership = await require_membership(env, fixture["group_id"], user["id"])
+    if membership.get("role") == "admin":
+        if "assigned_user_id" in body:
+            assigned_user_id = body["assigned_user_id"]
+            if assigned_user_id is not None and status == "on_bench":
+                # A benched seat with a holder is a state the rest of this
+                # endpoint doesn't expect: the normal claim path (the
+                # `elif holder:`/`else:` branches below) treats a holder as
+                # authoritative and refuses anyone else, so a seat stuck
+                # here could never be claimed even though list_listings
+                # shows it as available. Reject the conflicting payload
+                # rather than silently picking one field over the other.
+                raise ApiError(400, "assigned_user_id must be null when status is on_bench")
+            if assigned_user_id is not None:
+                target = await query_one(
+                    env,
+                    "SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?",
+                    fixture["group_id"],
+                    assigned_user_id,
+                )
+                if target is None:
+                    raise ApiError(400, "assigned_user_id is not a member of this syndicate")
+        elif status == "on_bench":
+            assigned_user_id = None
+        else:
+            assigned_user_id = holder if holder is not None else user["id"]
+    elif holder:
         if holder != user["id"]:
             raise ApiError(403, "That seat belongs to another member")
         assigned_user_id = None if status == "on_bench" else holder
@@ -544,6 +749,84 @@ async def list_opponents(request, env, params):
             player["is_danger"] = bool(player["is_danger"])
         opponent["players"] = players_for_opponent
     return json_response({"opponents": opponents})
+
+
+# --- profile picture --------------------------------------------------------
+
+
+async def upload_avatar(request, env, params):
+    """Store the caller's own profile picture, for their Profile card.
+
+    The body is JSON ({"content_type", "image_base64"}), not a raw/multipart
+    upload -- Workers Python's request-body handling is simplest through the
+    same read_json() every other handler already uses, and a profile
+    picture is small enough that base64's overhead does not matter.
+
+    Written to R2 under a single fixed key per user (no extension) with the
+    content type stored as the object's own httpMetadata, rather than one
+    key per content type -- so re-uploading in a different format replaces
+    the old picture outright instead of leaving an orphaned copy behind
+    under its old key. There is still no OTHER object storage in this app
+    (see docs/backend.md); this is its first use, hence its own AVATARS
+    binding rather than folding it into whatever eventually fills the
+    player-headshot gap.
+    """
+    user = await current_user(request, env)
+    body = await read_json(request)
+    (content_type,) = require(body, "content_type")
+    (image_base64,) = require(body, "image_base64")
+
+    if content_type not in AVATAR_CONTENT_TYPES:
+        raise ApiError(
+            400, "content_type must be one of: " + ", ".join(AVATAR_CONTENT_TYPES)
+        )
+
+    # Checked before decoding, not after: b64decode() can raise TypeError
+    # for a non-string JSON value (a number, a list) rather than the
+    # binascii/ValueError a malformed string raises, which would otherwise
+    # escape as an uncaught 500. And bounding the *encoded* length up front
+    # rejects an oversized upload without first paying the CPU/memory cost
+    # of decoding all of it just to reject it on the decoded-byte check
+    # below.
+    if not isinstance(image_base64, str):
+        raise ApiError(400, "image_base64 must be a string")
+    if len(image_base64) > MAX_AVATAR_BASE64_CHARS:
+        raise ApiError(400, "Profile pictures are limited to 2 MiB")
+
+    try:
+        image_bytes = base64.b64decode(image_base64, validate=True)
+    except (binascii.Error, ValueError, TypeError):
+        raise ApiError(400, "image_base64 is not valid base64")
+    if not image_bytes:
+        raise ApiError(400, "image_base64 must not be empty")
+    if len(image_bytes) > MAX_AVATAR_BYTES:
+        raise ApiError(400, "Profile pictures are limited to 2 MiB")
+
+    await put_object(env, _avatar_key(user["id"]), image_bytes, content_type)
+
+    avatar_url = "/api/avatars/{}".format(user["id"])
+    await execute(env, "UPDATE users SET avatar_url = ? WHERE id = ?", avatar_url, user["id"])
+    updated = await query_one(env, "SELECT * FROM users WHERE id = ?", user["id"])
+    return json_response({"user": updated})
+
+
+async def get_avatar(request, env, params):
+    """Stream a member's uploaded profile picture back out of R2.
+
+    Unauthenticated: an avatar is not sensitive, and every other member who
+    can already see this user's name in a member list needs to be able to
+    show their picture too, which an auth-gated image would make awkward
+    (threading a bearer token through an <img src>). No avatar uploaded yet
+    (or a bad user id) is a 404, same as any other missing resource.
+    """
+    found = await get_object(env, _avatar_key(params["user_id"]))
+    if found is None:
+        raise ApiError(404, "No avatar uploaded for this user")
+    return binary_response(found["bytes"], found["content_type"] or "application/octet-stream")
+
+
+def _avatar_key(user_id):
+    return "avatars/" + user_id
 
 
 # --- preferences -----------------------------------------------------------

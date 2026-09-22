@@ -23,7 +23,9 @@ router.add("GET", "/api/me", handlers.get_me)
 router.add("GET", "/api/groups", handlers.list_groups)
 router.add("POST", "/api/groups", handlers.create_group)
 router.add("GET", "/api/groups/{group_id}", handlers.get_group)
+router.add("PATCH", "/api/groups/{group_id}", handlers.update_group)
 router.add("GET", "/api/groups/{group_id}/members", handlers.list_members)
+router.add("PATCH", "/api/groups/{group_id}/members/{user_id}", handlers.update_member)
 
 router.add("GET", "/api/groups/{group_id}/fixtures", handlers.list_fixtures)
 router.add("POST", "/api/groups/{group_id}/fixtures", handlers.create_fixture)
@@ -40,6 +42,9 @@ router.add("GET", "/api/roster", handlers.list_roster)
 router.add("GET", "/api/opponents", handlers.list_opponents)
 router.add("GET", "/api/preferences", handlers.get_preferences)
 router.add("PUT", "/api/preferences", handlers.update_preferences)
+
+router.add("PUT", "/api/me/avatar", handlers.upload_avatar)
+router.add("GET", "/api/avatars/{user_id}", handlers.get_avatar)
 
 router.add("POST", "/api/admin/sync", handlers.trigger_sync)
 

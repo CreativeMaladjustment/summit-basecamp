@@ -86,14 +86,18 @@ BENCH_NOTES = [
 QUICK_REPLIES = ["I'll take them", "We'll miss you", "Anyone else in?"]
 
 # Simplified debts: the ledger nets the circle down to the fewest transfers.
+# Who actually paid what and who owes whom is invented, same as which member
+# holds which seat above -- there is no real transaction history behind this
+# demo syndicate. Unlike the seat/price mocks, a specific per-member debt is
+# not left invented here: each member's paid/owed is their even share of the
+# package (which *is* real, from SEASONS), so debts nets to empty rather
+# than fabricating who owes whom and how much.
 LEDGER = {
     2026: {
         "package_cents": 248000,
-        "paid": {"u_you": 52000, "u_jason": 45500, "u_sarah": 50000, "u_alice": 46500, "u_bob": 54000},
-        "owed": {"u_you": 47500, "u_jason": 50500, "u_sarah": 49500, "u_alice": 50500, "u_bob": 50000},
-        "debts": [{"from": "u_jason", "to": "u_you", "cents": 4500},
-                  {"from": "u_jason", "to": "u_sarah", "cents": 500},
-                  {"from": "u_alice", "to": "u_bob", "cents": 4000}],
+        "paid": {k: 49600 for k in MEMBERS},
+        "owed": {k: 49600 for k in MEMBERS},
+        "debts": [],
     },
     2025: {
         "package_cents": 231000,

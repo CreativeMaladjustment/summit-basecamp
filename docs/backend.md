@@ -1,13 +1,16 @@
 # Backend
 
 The API is a single Cloudflare Python Worker (`summit-hearth-api`) over D1 for
-data and KV for sessions. The PWA is deployed separately on Cloudflare Pages
-and talks to this Worker cross-origin.
+data, KV for sessions, and R2 for member-uploaded profile pictures. The PWA is
+deployed separately on Cloudflare Pages and talks to this Worker cross-origin.
 
-There is no object storage. Player headshots and club crests are committed to
-`frontend/public/assets/images/` and served by Pages; `player_bios.image_path`
-holds the root-relative path to each one, falling back to
-`/assets/images/players/placeholder-avatar.webp`.
+Player headshots and club crests still have no object storage behind them --
+they're committed to `frontend/public/assets/images/` and served by Pages;
+`player_bios.image_path` holds the root-relative path to each one, falling
+back to `/assets/images/players/placeholder-avatar.webp`. Member avatars are
+the exception (see "Profile pictures" below): they're uploaded at runtime, so
+they can't be committed to the repo the way the roster/bio images are, hence
+the one R2 bucket (`AVATARS`).
 
 ## Layout
 
@@ -26,9 +29,10 @@ holds the root-relative path to each one, falling back to
 | `src/router.py` | Path matching (`/api/groups/{group_id}/fixtures`) |
 | `src/handlers.py` | One function per endpoint, including admin-only `trigger_sync` |
 | `src/db.py` | D1 helpers that hand back plain dicts |
+| `src/storage.py` | R2 helpers for the `AVATARS` bucket (member profile pictures) |
 | `src/auth.py` | Bearer token to user, membership and admin checks |
 | `src/splits.py` | Expense-split and settle-up arithmetic |
-| `src/responses.py` | JSON responses and `ApiError` |
+| `src/responses.py` | JSON responses, `ApiError`, and `binary_response` for a non-JSON body (an avatar) |
 | `src/sync.py` | Roster/fixture/opponent/headshot sync: diffs external data against D1 and writes what drifted |
 | `src/sync_sources.py` | Fetching and parsing for the NWSL and Wikipedia sources `sync.py` reconciles against |
 | `.github/workflows/sync-roster.yml` | Triggers the sync via `POST /api/admin/sync`, on deploy and on a weekly schedule |
@@ -60,11 +64,13 @@ curl -H 'X-Dev-User: usr_ada' http://localhost:8787/api/groups
 | GET | `/api/groups` | Syndicates the caller belongs to |
 | POST | `/api/groups` | Start a syndicate; the creator becomes its admin |
 | GET | `/api/groups/{id}` | One syndicate and its members |
+| PATCH | `/api/groups/{id}` | Rename a syndicate or set its total package price (admin) |
 | GET | `/api/groups/{id}/members` | Members only |
+| PATCH | `/api/groups/{id}/members/{user_id}` | Change a member's default seat number (self, or admin for anyone); change a role (admin only) |
 | GET | `/api/groups/{id}/fixtures` | Fixtures in kickoff order |
 | POST | `/api/groups/{id}/fixtures` | Add a fixture (admin); seats are created with it |
 | GET | `/api/fixtures/{id}/seats` | The seat map for one fixture |
-| PATCH | `/api/seats/{id}` | Claim, bench, gift, or list a seat for resale |
+| PATCH | `/api/seats/{id}` | Claim, bench, gift, or list a seat for resale (holder); reassign or edit any seat regardless of holder (admin) |
 | GET | `/api/groups/{id}/listings` | Upcoming seats going spare |
 | GET | `/api/groups/{id}/ledger` | Unsettled transactions, net balances, settle plan |
 | POST | `/api/groups/{id}/expenses` | Record an expense and split it |
@@ -73,6 +79,8 @@ curl -H 'X-Dev-User: usr_ada' http://localhost:8787/api/groups
 | GET | `/api/roster` | The home squad, club-wide (not per-syndicate) |
 | GET | `/api/opponents` | Visiting-club dossiers, each with its own scouting roster |
 | GET/PUT | `/api/preferences` | Notification preferences |
+| PUT | `/api/me/avatar` | Upload the caller's own profile picture |
+| GET | `/api/avatars/{user_id}` | Fetch a member's uploaded profile picture |
 
 ## Data model
 
@@ -84,6 +92,40 @@ A resale listing is not a table of its own. It is a seat allocation whose
 `status` is `resale_listed` with a `resale_price_cents`; a seat offered back to
 the syndicate for free sits at `on_bench`. `/api/groups/{id}/listings` reads
 both.
+
+`group_members.default_seat_number` (edited via `PATCH .../members/{user_id}`)
+is a member's season-long seat assignment -- what their Profile card shows --
+separate from `seat_allocations`, which is who is actually sitting where for
+one specific fixture (edited via `PATCH /api/seats/{id}`). A regular member
+can only change either for themselves: their own default seat, or a seat they
+already hold (bench it, gift it, list it -- never assign it to someone else,
+since they have no transfer authority over another member's seat). A
+syndicate admin can change both for anyone: reassign or bench any seat in
+their syndicate regardless of who holds it, edit any member's default seat
+number, and promote or demote a member's role -- the override that lets an
+admin fix a seat nobody else involved can (e.g. one whose holder has left the
+syndicate).
+
+## Profile pictures
+
+`PUT /api/me/avatar` stores the caller's own profile picture in the `AVATARS`
+R2 bucket and points `users.avatar_url` at `GET /api/avatars/{user_id}`, which
+streams it back out. The request body is JSON
+(`{"content_type", "image_base64"}`), not a raw/multipart upload -- Workers
+Python's body handling is simplest through the same `read_json()` every other
+handler already uses, and a profile picture is small enough (capped at 2 MiB)
+that base64's overhead doesn't matter. `content_type` must be
+`image/png`, `image/jpeg`, or `image/webp`.
+
+Each user has exactly one object in R2, keyed by their id with no extension;
+the content type is stored as the object's own R2 `httpMetadata` rather than
+baked into the key. Re-uploading in a different format replaces the picture
+outright instead of leaving an orphaned copy under its old key.
+
+`GET /api/avatars/{user_id}` is deliberately unauthenticated: an avatar isn't
+sensitive, and every other member who can already see this user's name in a
+member list needs to be able to show their picture too, which an auth-gated
+image would make awkward (threading a bearer token through an `<img src>`).
 
 `roster_players` and `opponents`/`opponent_players` (migration `0002`) are
 club-wide reference data, not scoped to a `group` — every syndicate reads the
@@ -239,6 +281,15 @@ wrongly-skipped one just never appears at all.
 - **Weighted payouts.** `split_equally` splits an expense evenly. Weighting by
   fixture tier and crediting members who bench a seat are still being decided;
   when they land, that one function changes.
+- **The frontend never calls this API.** `web/index.html` is a static build
+  (`web/build_src/build.py`) from mock data in `web/build_src/data.py`;
+  `web/src/app.js` only toggles pre-rendered DOM, it never fetches anything.
+  Every endpoint above -- including the admin seat/member/group editing and
+  avatar upload added alongside this note -- is real and tested
+  (`tests/test_api.py`) but not reachable from the deployed site yet, and
+  wiring the frontend up is blocked on sign-in above: without a real session,
+  there is no way for a fetch call to know who "the caller" is. This is a
+  standing gap, not something this change set attempts to close.
 
 ## Testing
 

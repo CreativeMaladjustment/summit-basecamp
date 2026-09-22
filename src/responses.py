@@ -37,6 +37,17 @@ def error_response(status, message):
     return json_response({"error": message}, status=status)
 
 
+def binary_response(data, content_type, status=200):
+    """Like json_response, but for raw bytes with their own content type
+    (an uploaded avatar) -- _to_js_options always forces
+    Content-Type: application/json, which a binary body must not carry."""
+    options = to_js(
+        {"status": status, "headers": {"Content-Type": content_type}},
+        dict_converter=Object.fromEntries,
+    )
+    return Response.new(data, options)
+
+
 def no_content():
     return Response.new(None, _to_js_options(204, {}))
 

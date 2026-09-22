@@ -26,9 +26,20 @@
     }
   ],
 
-  // No object storage binding: player headshots and crests are committed to
-  // frontend/public/assets/images/ and served by Pages. player_bios.image_path
-  // holds the root-relative path to each one.
+  // Player headshots and crests are still committed to
+  // frontend/public/assets/images/ and served by Pages -- player_bios.image_path
+  // holds the root-relative path to each one, and this app has no general
+  // object storage for that. AVATARS below is the one exception: member
+  // profile pictures are user-uploaded at runtime, so they can't be
+  // committed to the repo the way the roster/bio images are. The bucket
+  // itself is created (idempotently) by deploy.yml's "Create the avatars
+  // R2 bucket" step -- no `wrangler r2 bucket create` run by hand.
+  "r2_buckets": [
+    {
+      "binding": "AVATARS",
+      "bucket_name": "summit-hearth-avatars"
+    }
+  ],
 
   "kv_namespaces": [
     {
