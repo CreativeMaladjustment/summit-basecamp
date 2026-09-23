@@ -35,6 +35,9 @@ const state = Object.assign({
   releasedSeats: [],        // seats you gave up via Call a Sub
   syndicateName: null,      // set once "Start a new syndicate" or "Join with code" succeeds
   groupId: null,             // the real POST /api/groups(/join) id behind syndicateName
+  section: null,              // the syndicate's real section, e.g. "114"
+  seatRow: null,               // the syndicate's real row, e.g. "8"
+  mySeatLabel: null,           // this member's own real seat number, e.g. "3"
   prefs: { checkin3Day: true, benchAlerts: true, dailyBio: true, bioScope: 'home_first', pushEnabled: false },
   photos: {},                // playerId -> data URL, restored on load
   sessionToken: null,        // bearer token from POST /api/auth/session
@@ -383,11 +386,19 @@ async function signIn(guestId) {
 // Shared by both a successful join and a successful create -- the group
 // this device is now "in", cosmetically, for the rest of this static build
 // (fixtures/ledger/etc. still render fixed mock data regardless of which
-// real group this is -- see new_syndicate_sheet()'s own copy).
-function settleIntoSyndicate(group) {
+// real group this is -- see new_syndicate_sheet()'s own copy). mySeatLabel
+// is only ever known at creation time (join has no seat-picking step yet),
+// so it defaults to null here -- explicitly resetting it on every call
+// rather than leaving a previous syndicate's seat label stuck around after
+// joining a different one with none of its own.
+function settleIntoSyndicate(group, mySeatLabel = null) {
   state.groupId = group.id;
   state.syndicateName = group.name;
+  state.section = group.section || null;
+  state.seatRow = group.seat_row || null;
+  state.mySeatLabel = mySeatLabel;
   paintSyndicateName();
+  paintSeatAssignment();
   persist();
   closeSheet();
   showStage('app');
@@ -518,6 +529,22 @@ function paintSyndicateName() {
   }
 }
 
+// Settings' "Seat assignment" card -- the real section/row/seat this device
+// last created or was told about, once any of the three is known. Parts
+// that were never set (e.g. a syndicate created with no section given)
+// just don't appear, rather than showing "Sec null".
+function paintSeatAssignment() {
+  if (!state.section && !state.seatRow && !state.mySeatLabel) return;
+  const parts = [];
+  if (state.section) parts.push(`Sec ${state.section}`);
+  if (state.seatRow) parts.push(`Row ${state.seatRow}`);
+  if (state.mySeatLabel) parts.push(`Seat ${state.mySeatLabel}`);
+  const text = parts.join(', ');
+  for (const node of document.querySelectorAll('[data-role="seat-assignment"]')) {
+    node.textContent = text;
+  }
+}
+
 function label12(hhmm) {
   const [h24, m] = hhmm.split(':').map(Number);
   const suffix = h24 >= 12 ? 'PM' : 'AM';
@@ -546,6 +573,7 @@ function main() {
   paintDeviceBanner();
   paintPreview();
   paintSyndicateName();
+  paintSeatAssignment();
   paintPasswordField();
   loadGuestSlots();
   hydrateProfile();
@@ -810,6 +838,10 @@ function main() {
     const totalSeats = Number(document.getElementById('new-syn-seats').value) || 1;
     const costInput = document.getElementById('new-syn-cost');
     const packageCostCents = costInput.value ? Math.round(Number(costInput.value) * 100) : 0;
+    const section = document.getElementById('new-syn-section').value.trim();
+    const seatRow = document.getElementById('new-syn-row').value.trim();
+    const seatLabels = document.getElementById('new-syn-seat-labels').value.trim();
+    const mySeatLabel = document.getElementById('new-syn-my-seat').value.trim();
 
     let res;
     try {
@@ -818,6 +850,7 @@ function main() {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.sessionToken}` },
         body: JSON.stringify({
           name, season_year: seasonYear, total_seats: totalSeats, package_cost_cents: packageCostCents,
+          section, seat_row: seatRow, seat_labels: seatLabels, my_seat_label: mySeatLabel,
         }),
       });
     } catch {
@@ -830,7 +863,7 @@ function main() {
       return;
     }
     const { group } = await res.json();
-    settleIntoSyndicate(group);
+    settleIntoSyndicate(group, mySeatLabel || null);
   });
 }
 

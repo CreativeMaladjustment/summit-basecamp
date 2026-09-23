@@ -90,21 +90,23 @@ def syndicate():
 
 
 def new_syndicate_sheet():
-    """Submits to the real POST /api/groups -- name, season, total seats and
-    package cost all land in D1, same as everything else this sheet's own
-    fields take. What doesn't follow: every fixture, seat and ledger figure
-    shown elsewhere in this static build is still fixed mock data keyed to
-    a specific seat count and price (web/build_src/data.py), unconnected to
-    whatever group this creates -- resizing those for real is its own,
-    larger piece of work. Said plainly in the sheet's own copy rather than
-    quietly implying more than lands."""
+    """Submits to the real POST /api/groups -- name, season, total seats,
+    package cost, section/row/seat numbers and the creator's own seat all
+    land in D1, same as everything else this sheet's own fields take. What
+    doesn't follow: every fixture, seat and ledger figure shown elsewhere in
+    this static build is still fixed mock data keyed to a specific seat
+    count and price (web/build_src/data.py), unconnected to whatever group
+    this creates -- resizing those for real is its own, larger piece of
+    work. Said plainly in the sheet's own copy rather than quietly implying
+    more than lands."""
     return sheet_template("sheet-new-syndicate", [
         h("p", {"cls": "eyebrow"}, "Find your syndicate"),
         h("h2", {"cls": "sheet__title"}, "Start a new syndicate"),
         h("p", {"cls": "sheet__sub"},
           "Creates a real syndicate you're the admin of. The demo schedule "
           "and ledger elsewhere in this app don't resize to match it yet -- "
-          "only the name, season, seats and cost themselves are real."),
+          "everything on this form itself is real, including which physical "
+          "seats they are and which one is yours."),
         h("form", {"id": "new-syndicate-form"},
           h("label", {"cls": "field"},
             h("span", {"cls": "field__label"}, "Syndicate name"),
@@ -116,6 +118,19 @@ def new_syndicate_sheet():
           h("label", {"cls": "field"},
             h("span", {"cls": "field__label"}, "Total seats"),
             h("input", {"cls": "input", "type": "number", "id": "new-syn-seats", "value": "2", "min": "1"})),
+          h("div", {"style": {"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "10px"}},
+            h("label", {"cls": "field"},
+              h("span", {"cls": "field__label"}, "Section"),
+              h("input", {"cls": "input", "id": "new-syn-section", "placeholder": "e.g. 114"})),
+            h("label", {"cls": "field"},
+              h("span", {"cls": "field__label"}, "Row"),
+              h("input", {"cls": "input", "id": "new-syn-row", "placeholder": "e.g. 8"}))),
+          h("label", {"cls": "field"},
+            h("span", {"cls": "field__label"}, "Seat numbers"),
+            h("input", {"cls": "input", "id": "new-syn-seat-labels", "placeholder": "e.g. 3, 4"})),
+          h("label", {"cls": "field"},
+            h("span", {"cls": "field__label"}, "Your seat number"),
+            h("input", {"cls": "input", "id": "new-syn-my-seat", "placeholder": "e.g. 3"})),
           h("label", {"cls": "field"},
             h("span", {"cls": "field__label"}, "Package cost"),
             h("input", {"cls": "input", "type": "number", "id": "new-syn-cost", "placeholder": "2480.00", "min": "0", "step": "0.01"})),
