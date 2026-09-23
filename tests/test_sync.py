@@ -372,6 +372,27 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn(NWSL_ROSTER_URL, message)
         self.assertIn("Please enable JavaScript", message)
 
+    async def test_fetch_nwsl_roster_error_finds_a_landmark_far_into_a_long_page(self):
+        # A real roster-page snapshot turned out to be ~200 KB, with the
+        # <body> starting well past any fixed-length prefix -- confirms the
+        # diagnostic snippet searches the whole page for a marker this
+        # module's other selectors key off of, rather than only ever
+        # showing <head> boilerplate (see the real one pasted into this
+        # PR's own description).
+        padding = "<!-- filler --> " * 200  # pushes the marker past a 1500-char prefix
+        html = (
+            "<html><body>{}<div class=\"d3w-something-else\">no player rows here</div>"
+            "</body></html>"
+        ).format(padding)
+        js.fetch.install({NWSL_ROSTER_URL: FakeFetchResponse(html)})
+
+        with self.assertRaises(SyncSourceError) as cm:
+            await fetch_nwsl_roster(self.env)
+
+        message = str(cm.exception)
+        self.assertIn("d3w-", message)
+        self.assertIn("no player rows here", message)
+
     async def test_roster_sync_picks_up_a_name_change(self):
         await self._seed_player(name="Ada Okafor")
         await sync_exec(self.env, "UPDATE roster_players SET source_ref = 'https://www.nwslsoccer.com/players/ada-okafor' WHERE id = 'plr_1'")
