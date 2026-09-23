@@ -136,11 +136,25 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload["user"]["phone"], "(303) 555-0199")
         self.assertEqual(payload["user"]["name"], "Ada")  # unchanged (see seed/dev_seed.sql)
 
-    def test_phone_and_contact_email_can_be_cleared(self):
+    def test_phone_and_contact_email_can_be_cleared_with_an_empty_string(self):
         call(self.env, "PATCH", "/api/me", body={"phone": "(303) 555-0142"})
         status, payload = call(self.env, "PATCH", "/api/me", body={"phone": ""})
         self.assertEqual(status, 200)
         self.assertIsNone(payload["user"]["phone"])
+
+    def test_phone_and_contact_email_can_be_cleared_with_an_explicit_null(self):
+        call(
+            self.env,
+            "PATCH",
+            "/api/me",
+            body={"phone": "(303) 555-0142", "contact_email": "ada@family.example"},
+        )
+        status, payload = call(
+            self.env, "PATCH", "/api/me", body={"phone": None, "contact_email": None}
+        )
+        self.assertEqual(status, 200)
+        self.assertIsNone(payload["user"]["phone"])
+        self.assertIsNone(payload["user"]["contact_email"])
 
     def test_updating_the_profile_rejects_an_empty_name(self):
         status, payload = call(self.env, "PATCH", "/api/me", body={"name": "   "})

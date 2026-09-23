@@ -83,7 +83,7 @@ async def update_me(request, env, params):
     if "name" in body:
         name = body["name"]
         if not isinstance(name, str) or not name.strip():
-            raise ApiError(400, "name must not be empty")
+            raise ApiError(400, "name must be a non-empty string")
         updates["name"] = name.strip()
     for field in ("phone", "contact_email"):
         if field in body:
