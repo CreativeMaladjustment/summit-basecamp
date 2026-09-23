@@ -34,6 +34,7 @@ SCHEMA = [
     os.path.join(ROOT, "migrations", "0009_user_contact_info.sql"),
     os.path.join(ROOT, "migrations", "0010_guest_password_auth.sql"),
     os.path.join(ROOT, "migrations", "0011_syndicate_seat_labels.sql"),
+    os.path.join(ROOT, "migrations", "0012_bench_notes.sql"),
 ]
 SEED = os.path.join(ROOT, "seed", "dev_seed.sql")
 
@@ -841,6 +842,133 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 400)
         self.assertIn("resale_price_cents", payload["error"])
+
+    def test_releasing_to_the_bench_with_a_note_creates_a_bench_note(self):
+        status, _ = call(
+            self.env,
+            "PATCH",
+            "/api/seats/seat_001",
+            body={
+                "status": "on_bench",
+                "note": "Out of town -- seat's free if anyone wants it.",
+                "cost_path": "repay",
+                "amount_cents": 5500,
+            },
+        )
+        self.assertEqual(status, 200)
+
+        status, payload = call(self.env, "GET", "/api/groups/grp_summit/bench-notes")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(payload["notes"]), 1)
+        note = payload["notes"][0]
+        self.assertEqual(note["fixture_id"], "fix_001")
+        self.assertEqual(note["seat_number"], 1)
+        self.assertEqual(note["author_id"], "usr_ada")
+        self.assertEqual(note["author_name"], "Ada")
+        self.assertEqual(note["cost_path"], "repay")
+        self.assertEqual(note["amount_cents"], 5500)
+        self.assertEqual(note["replies"], [])
+
+    def test_releasing_to_the_bench_without_a_note_creates_none(self):
+        status, _ = call(
+            self.env, "PATCH", "/api/seats/seat_001", body={"status": "on_bench"}
+        )
+        self.assertEqual(status, 200)
+
+        status, payload = call(self.env, "GET", "/api/groups/grp_summit/bench-notes")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["notes"], [])
+
+    def test_a_free_bench_note_does_not_need_an_amount(self):
+        status, _ = call(
+            self.env,
+            "PATCH",
+            "/api/seats/seat_001",
+            body={"status": "on_bench", "note": "You eat it, no cost.", "cost_path": "free"},
+        )
+        self.assertEqual(status, 200)
+
+        status, payload = call(self.env, "GET", "/api/groups/grp_summit/bench-notes")
+        self.assertIsNone(payload["notes"][0]["amount_cents"])
+
+    def test_claiming_a_seat_ignores_any_note_field(self):
+        # note is only meaningful for status=on_bench -- claiming seat_003
+        # (already on the bench) must not create a note just because one
+        # was sent along with an unrelated transition.
+        status, _ = call(
+            self.env,
+            "PATCH",
+            "/api/seats/seat_003",
+            user="usr_bo",
+            body={"status": "confirmed", "note": "should be ignored"},
+        )
+        self.assertEqual(status, 200)
+
+        status, payload = call(self.env, "GET", "/api/groups/grp_summit/bench-notes")
+        self.assertEqual(payload["notes"], [])
+
+    def test_a_non_member_cannot_list_bench_notes(self):
+        asyncio.run(
+            self.env.DB.prepare(
+                "INSERT INTO users (id, email, name, auth_provider, auth_provider_id)"
+                " VALUES ('usr_out', 'out@example.com', 'Out', 'google', 'dev-out')"
+            ).run()
+        )
+        status, _ = call(self.env, "GET", "/api/groups/grp_summit/bench-notes", user="usr_out")
+        self.assertEqual(status, 403)
+
+    def test_a_member_can_reply_to_a_bench_note(self):
+        call(self.env, "PATCH", "/api/seats/seat_001", body={"status": "on_bench", "note": "Anyone?", "cost_path": "free"})
+        status, payload = call(self.env, "GET", "/api/groups/grp_summit/bench-notes")
+        note_id = payload["notes"][0]["id"]
+
+        status, payload = call(
+            self.env,
+            "POST",
+            f"/api/bench-notes/{note_id}/replies",
+            user="usr_bo",
+            body={"body": "We'll miss you -- I'll take it."},
+        )
+        self.assertEqual(status, 201)
+        self.assertEqual(payload["reply"]["author_id"], "usr_bo")
+        self.assertEqual(payload["reply"]["body"], "We'll miss you -- I'll take it.")
+
+        status, payload = call(self.env, "GET", "/api/groups/grp_summit/bench-notes")
+        self.assertEqual(len(payload["notes"][0]["replies"]), 1)
+        self.assertEqual(payload["notes"][0]["replies"][0]["author_name"], "Bo")
+
+    def test_a_reply_needs_a_body(self):
+        call(self.env, "PATCH", "/api/seats/seat_001", body={"status": "on_bench", "note": "Anyone?", "cost_path": "free"})
+        status, payload = call(self.env, "GET", "/api/groups/grp_summit/bench-notes")
+        note_id = payload["notes"][0]["id"]
+
+        status, _ = call(
+            self.env, "POST", f"/api/bench-notes/{note_id}/replies", body={"body": ""}
+        )
+        self.assertEqual(status, 400)
+
+    def test_replying_to_an_unknown_note_is_404(self):
+        status, _ = call(
+            self.env, "POST", "/api/bench-notes/note_nope/replies", body={"body": "hi"}
+        )
+        self.assertEqual(status, 404)
+
+    def test_a_non_member_cannot_reply_to_a_bench_note(self):
+        asyncio.run(
+            self.env.DB.prepare(
+                "INSERT INTO users (id, email, name, auth_provider, auth_provider_id)"
+                " VALUES ('usr_out', 'out@example.com', 'Out', 'google', 'dev-out')"
+            ).run()
+        )
+        call(self.env, "PATCH", "/api/seats/seat_001", body={"status": "on_bench", "note": "Anyone?", "cost_path": "free"})
+        status, payload = call(self.env, "GET", "/api/groups/grp_summit/bench-notes")
+        note_id = payload["notes"][0]["id"]
+
+        status, _ = call(
+            self.env, "POST", f"/api/bench-notes/{note_id}/replies",
+            user="usr_out", body={"body": "hi"},
+        )
+        self.assertEqual(status, 403)
 
     def test_a_resale_price_must_be_a_positive_number(self):
         for bad_price in ("0", -500, "not-a-number", True):

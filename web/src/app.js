@@ -31,8 +31,6 @@ const state = Object.assign({
   stage: 'landing',        // landing | syndicate | app
   tab: 'matchday',
   season: '2026',
-  claimedSeats: [],         // seat keys claimed from the bench
-  releasedSeats: [],        // seats you gave up via Call a Sub
   syndicateName: null,      // set once "Start a new syndicate" or "Join with code" succeeds
   groupId: null,             // the real POST /api/groups(/join) id behind syndicateName
   section: null,              // the syndicate's real section, e.g. "114"
@@ -106,143 +104,9 @@ function closeSheet() {
   openSheetId = null;
 }
 
-// ---------- Seats: flip which pre-rendered variant is visible ----------
-
-function seatNodes(key) {
-  return document.querySelectorAll(`[data-seat="${CSS.escape(key)}"]`);
-}
-
-function setSeatState(key, toState) {
-  for (const node of seatNodes(key)) {
-    node.hidden = node.dataset.state !== toState;
-  }
-}
-
-function claimSeat(key, handOffId) {
-  setSeatState(key, 'claimed');
-  if (!state.claimedSeats.includes(key)) state.claimedSeats.push(key);
-  // The card in Bench and the row's claim button in Pitch live inside a
-  // [data-seat] wrapper too, so hide the whole card once claimed.
-  for (const card of document.querySelectorAll(`[data-bench-card][data-seat="${CSS.escape(key)}"]`)) {
-    card.hidden = true;
-  }
-  for (const btn of document.querySelectorAll(`[data-claim-seat="${CSS.escape(key)}"]`)) {
-    btn.hidden = true;
-  }
-  // Claiming from the Matchday bench-note thread flips that note's own
-  // controls off and shows who took it, in addition to the generic
-  // [data-seat] toggling above.
-  if (handOffId) {
-    const controls = document.getElementById(`active-controls-${handOffId}`);
-    if (controls) controls.hidden = true;
-    const takenLine = document.getElementById(`taken-line-${handOffId}`);
-    if (takenLine) {
-      takenLine.textContent = 'You took the seat.';
-      takenLine.hidden = false;
-    }
-  }
-  refreshBenchCount();
-  persist();
-}
-
-// outcome: 'released' (open to the whole circle), 'gifted' (a named guest)
-// or 'listed' (an external exchange) — only 'released' also reveals the
-// seat's claimable Bench card, keyed separately (see seats.py/bench.py) so
-// gifting or listing a seat never makes it wrongly appear open to claim.
-// The hero's wording picks the matching `${key}:reason` variant (seats.py)
-// instead of always saying "On the bench".
-function releaseSeat(key, outcome) {
-  setSeatState(key, 'released');
-  setSeatState(`${key}:reason`, outcome);
-  if (outcome === 'released') setSeatState(`${key}:listing`, 'open');
-  if (!state.releasedSeats.includes(key)) state.releasedSeats.push(key);
-  refreshBenchCount();
-  persist();
-}
-
-function refreshBenchCount() {
-  const openCards = document.querySelectorAll('[data-bench-card]:not([hidden])');
-  const count = openCards.length;
-  for (const el of document.querySelectorAll('[data-bench-count]')) {
-    el.textContent = String(count);
-    el.closest('button')?.classList.toggle('is-empty', count === 0);
-  }
-  const waiting = document.getElementById('bench-waiting');
-  if (waiting) {
-    const visibleCards = waiting.querySelectorAll('[data-bench-card]:not([hidden])');
-    waiting.hidden = visibleCards.length === 0;
-  }
-  const listed = document.getElementById('bench-listed');
-  if (listed) {
-    const visibleListed = listed.querySelectorAll('[data-bench-card]:not([hidden])');
-    listed.hidden = visibleListed.length === 0;
-  }
-  const empty = document.getElementById('bench-empty');
-  if (empty) {
-    const anyVisible = document.querySelectorAll('#bench-waiting [data-bench-card]:not([hidden]), #bench-listed [data-bench-card]:not([hidden])').length;
-    empty.hidden = anyVisible > 0;
-  }
-}
-
-// ---------- Bench notes: the one place a whole new card is built in JS,
-// because its text is whatever the person just typed. ----------
-
 function moneyCents(cents) {
   const dollars = cents / 100;
   return cents % 100 === 0 ? `$${dollars.toLocaleString('en-US')}` : `$${dollars.toFixed(2)}`;
-}
-
-function addBenchNoteCard({ fixtureId, seatNumber, opponent, short, body, costPath, amountCents }) {
-  const list = document.getElementById('bench-notes-list');
-  const section = document.getElementById('bench-notes-section');
-  if (!list || !section) return;
-
-  const card = document.createElement('article');
-  card.className = 'card';
-
-  const head = document.createElement('div');
-  head.style.cssText = 'display:flex;justify-content:space-between;gap:8px;align-items:flex-start';
-  const who = document.createElement('div');
-  who.style.cssText = 'display:flex;gap:10px';
-  const av = document.createElement('div');
-  av.className = 'avatar';
-  av.style.background = '#134E48';
-  av.textContent = 'YO';
-  const meta = document.createElement('div');
-  const name = document.createElement('p');
-  name.style.cssText = 'margin:0;font-weight:600;font-size:14px';
-  name.textContent = `You · ${short} · Seat ${seatNumber}`;
-  const when = document.createElement('p');
-  when.className = 'eyebrow';
-  when.style.marginTop = '2px';
-  when.textContent = 'just now';
-  meta.append(name, when);
-  who.append(av, meta);
-
-  const costBadge = document.createElement('span');
-  costBadge.className = costPath === 'repay' ? 'badge badge--green' : 'badge badge--gold';
-  costBadge.textContent = costPath === 'repay' ? `Get paid back · ${moneyCents(amountCents)}` : 'On the house';
-  head.append(who, costBadge);
-
-  const text = document.createElement('p');
-  text.style.cssText = 'margin:10px 0 0;font-size:15px';
-  text.textContent = body; // textContent, never innerHTML — this is user input
-
-  card.append(head, text);
-  list.prepend(card);
-  section.hidden = false;
-}
-
-function addReply(noteId, text) {
-  const container = document.getElementById(`replies-${noteId}`);
-  if (!container || !text.trim()) return;
-  container.hidden = false;
-  const p = document.createElement('p');
-  p.style.cssText = 'margin:0 0 6px;font-size:14px';
-  const strong = document.createElement('strong');
-  strong.textContent = 'You: ';
-  p.append(strong, document.createTextNode(text.trim()));
-  container.append(p);
 }
 
 // ---------- Photo drop: the other irreducible spot ----------
@@ -467,6 +331,12 @@ function settleIntoSyndicate(group, mySeatLabel = null) {
   showStage('app');
   showTab('matchday');
   paintRealSyndicateDetail();
+  paintRealFixtures();
+}
+
+function balanceLineText(cents) {
+  if (cents === 0) return 'All square with the 14ers.';
+  return cents > 0 ? `The circle holds your ${moneyCents(cents)}.` : `You hold the tab (${moneyCents(Math.abs(cents))}).`;
 }
 
 // Overwrites the 14ers ledger card and the header's "N seats · Sec/Row"
@@ -587,21 +457,25 @@ async function paintRealSyndicateDetail() {
     }
   }
 
+  const myCents = balances[state.user?.id] || 0;
   const balanceLineEl = document.getElementById('ledger-balance-line');
   if (balanceLineEl) {
-    const myCents = balances[state.user?.id] || 0;
     const textEl = balanceLineEl.querySelector('[data-role="balance-text"]');
-    if (textEl) {
-      textEl.textContent = myCents === 0 ? 'All square with the 14ers.'
-        : myCents > 0 ? `The circle holds your ${moneyCents(myCents)}.`
-        : `You hold the tab (${moneyCents(Math.abs(myCents))}).`;
-    }
+    if (textEl) textEl.textContent = balanceLineText(myCents);
     const settleBtn = balanceLineEl.querySelector('[data-open-sheet="sheet-settleup"]');
     if (settleBtn) {
       settleBtn.hidden = myCents === 0;
       settleBtn.dataset.settleAmount = String(Math.abs(myCents));
       settleBtn.dataset.settleOwed = myCents > 0 ? 'true' : 'false';
     }
+  }
+  // Matchday's own shorter link-to-Hearth strip -- same real balance, a
+  // second real DOM node (layout-only difference, see matchday.py).
+  const matchdayStrip = document.getElementById('matchday-balance-strip');
+  if (matchdayStrip) {
+    const textEl = matchdayStrip.querySelector('[data-role="matchday-balance-text"]');
+    if (textEl) textEl.textContent = balanceLineText(myCents);
+    matchdayStrip.hidden = false;
   }
 
   const historyEl = document.getElementById('ledger-history-rows');
@@ -640,6 +514,657 @@ function initials(name) {
   return parts.length > 1
     ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
     : name.slice(0, 2).toUpperCase();
+}
+
+// ---------- Matchday / Pitch / Bench: a syndicate's real fixtures, seats
+// and bench notes. Which fixtures exist and who holds which seat is real
+// per-syndicate data that doesn't exist at build time, so -- unlike the
+// rest of this static site -- these three screens are built here from the
+// API rather than pre-rendered and just toggled. ----------
+
+const QUICK_REPLIES = ["I'll take them", "We'll miss you", "Anyone else in?"];
+
+let realFixturesCache = [];   // [{fixture, seats}], sorted by kickoff
+let realBenchNotesCache = []; // [{...note, replies}], newest first
+let callASubTarget = null;    // {allocationId, fixtureId, seatNumber, faceCents}
+
+function matchDateLabel(iso) {
+  const d = new Date(iso);
+  return `${d.toLocaleDateString('en-US', { weekday: 'short' })}, ${d.toLocaleDateString('en-US', { month: 'short' })} ${d.getDate()}`;
+}
+
+function matchTimeLabel(iso) {
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+
+// D1's CURRENT_TIMESTAMP is UTC, space-separated ("2026-09-23 02:20:00")
+// with no zone marker -- new Date() on that string is parsed as *local*
+// time by most engines, which would skew every relative time by whatever
+// this browser's UTC offset is. Coerced into an unambiguous UTC ISO string
+// first. Fixture kickoff times, by contrast, are wall-clock local venue
+// times a caller supplies directly (like the rest of this app's dates), so
+// they're parsed as-is everywhere else.
+function parseSqliteUtc(s) {
+  if (!s) return new Date(NaN);
+  const iso = s.includes('T') ? s : s.replace(' ', 'T');
+  return new Date(iso.endsWith('Z') ? iso : iso + 'Z');
+}
+
+function relativeTime(iso) {
+  const mins = Math.round((Date.now() - parseSqliteUtc(iso).getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.round(hrs / 24)}d ago`;
+}
+
+function avatarEl(label, empty) {
+  const av = document.createElement('div');
+  av.className = empty ? 'avatar avatar--empty' : 'avatar';
+  if (!empty) av.style.background = '#134E48';
+  av.title = label;
+  av.setAttribute('aria-label', label);
+  av.textContent = empty ? '+' : initials(label);
+  return av;
+}
+
+function seatHolderLabel(seat) {
+  if (seat.assigned_user_id) return seat.assigned_user_name || 'Member';
+  if (seat.guest_name) return seat.guest_name;
+  if (seat.status === 'resale_listed') return 'Listed outside';
+  if (seat.status === 'on_bench') return 'On the bench';
+  return 'Open';
+}
+
+function seatLineEl(seat, onDark) {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display:flex;align-items:center;gap:8px';
+  const label = seatHolderLabel(seat);
+  wrap.appendChild(avatarEl(label, !seat.assigned_user_id && !seat.guest_name));
+  const meta = document.createElement('div');
+  const nameP = document.createElement('p');
+  nameP.style.cssText = `margin:0;font-size:13px;font-weight:600;${onDark ? 'color:#fff' : ''}`;
+  nameP.textContent = label;
+  const seatP = document.createElement('p');
+  seatP.style.cssText = `margin:0;font-size:11px;font-family:var(--font-mono);${onDark ? 'color:rgba(255,255,255,.62)' : 'color:var(--ink-mute)'}`;
+  seatP.textContent = `Seat ${seat.seat_number}`;
+  meta.append(nameP, seatP);
+  wrap.appendChild(meta);
+  return wrap;
+}
+
+async function paintRealFixtures() {
+  if (!state.groupId || !state.sessionToken) return;
+  const authHeaders = { Authorization: `Bearer ${state.sessionToken}` };
+
+  let fixtures = [];
+  try {
+    const res = await fetch(`${API_BASE}/api/groups/${state.groupId}/fixtures`, { headers: authHeaders });
+    if (!res.ok) return;
+    ({ fixtures } = await res.json());
+  } catch {
+    return; // offline -- leave whatever was last painted (or the loading placeholder) as-is
+  }
+
+  const withSeats = await Promise.all(fixtures.map(async (fixture) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/fixtures/${fixture.id}/seats`, { headers: authHeaders });
+      const body = res.ok ? await res.json() : null;
+      return { fixture, seats: body ? body.seats : [] };
+    } catch {
+      return { fixture, seats: [] };
+    }
+  }));
+  withSeats.sort((a, b) => a.fixture.kickoff_at.localeCompare(b.fixture.kickoff_at));
+  realFixturesCache = withSeats;
+
+  let notes = [];
+  try {
+    const res = await fetch(`${API_BASE}/api/groups/${state.groupId}/bench-notes`, { headers: authHeaders });
+    if (res.ok) ({ notes } = await res.json());
+  } catch {
+    // leave notes empty -- bench cards and the Matchday section just show without one
+  }
+  realBenchNotesCache = notes;
+
+  paintMatchdayHero();
+  paintPitchRows();
+  paintBenchLists();
+  paintBenchNotesSection();
+  paintBenchCountBadge();
+}
+
+function paintBenchCountBadge() {
+  const count = realFixturesCache.reduce(
+    (n, { seats }) => n + seats.filter((s) => s.status === 'on_bench' || s.status === 'resale_listed').length,
+    0,
+  );
+  for (const el of document.querySelectorAll('[data-bench-count]')) {
+    el.textContent = String(count);
+    el.closest('button')?.classList.toggle('is-empty', count === 0);
+  }
+}
+
+function nextFixtureEntry() {
+  // realFixturesCache is sorted by kickoff ascending -- with no fixture
+  // still ahead of kickoff, the last (most recent) one stands in rather
+  // than showing nothing, same call the old build-time mock made.
+  const now = new Date();
+  const upcoming = realFixturesCache.filter(({ fixture }) => new Date(fixture.kickoff_at) >= now);
+  if (upcoming.length) return upcoming[0];
+  return realFixturesCache.length ? realFixturesCache[realFixturesCache.length - 1] : null;
+}
+
+function paintMatchdayHero() {
+  const hero = document.getElementById('matchday-hero');
+  if (!hero) return;
+  const entry = nextFixtureEntry();
+  hero.innerHTML = '';
+  if (!entry) {
+    hero.className = 'card';
+    hero.removeAttribute('style');
+    const p = document.createElement('p');
+    p.style.cssText = 'margin:0;color:var(--ink-mute)';
+    p.textContent = 'No fixtures logged for this syndicate yet.';
+    hero.appendChild(p);
+    return;
+  }
+  const { fixture, seats } = entry;
+  hero.className = '';
+  hero.style.cssText = 'border-radius:var(--radius-lg);overflow:hidden;background:#134E48;color:#fff;'
+    + 'border-top:3px solid #C84B31;padding:18px 16px;animation:ssUp .3s ease both';
+
+  const topRow = document.createElement('div');
+  topRow.style.cssText = 'display:flex;justify-content:space-between;gap:10px;align-items:flex-start';
+  const left = document.createElement('div');
+  const eyebrow = document.createElement('p');
+  eyebrow.className = 'eyebrow';
+  eyebrow.style.color = 'rgba(255,255,255,.66)';
+  eyebrow.textContent = 'Next match';
+  const title = document.createElement('h2');
+  title.style.cssText = 'font-size:24px;font-weight:800;margin-top:4px;color:#fff';
+  title.textContent = `Summit vs ${fixture.opponent}`;
+  const sub = document.createElement('p');
+  sub.style.cssText = 'margin:6px 0 0;font-size:14px;color:rgba(255,255,255,.8)';
+  sub.textContent = `${matchDateLabel(fixture.kickoff_at)} · ${matchTimeLabel(fixture.kickoff_at)} · ${fixture.venue}`;
+  left.append(eyebrow, title, sub);
+  topRow.appendChild(left);
+  if (fixture.tier === 'rivalry') {
+    const badgeEl = document.createElement('span');
+    badgeEl.className = 'badge badge--gold';
+    badgeEl.textContent = 'Rivalry';
+    topRow.appendChild(badgeEl);
+  }
+  hero.appendChild(topRow);
+
+  const rosterLabel = document.createElement('p');
+  rosterLabel.className = 'eyebrow';
+  rosterLabel.style.cssText = 'color:rgba(255,255,255,.66);margin-top:16px';
+  rosterLabel.textContent = 'Taking the pitch';
+  hero.appendChild(rosterLabel);
+
+  const roster = document.createElement('div');
+  roster.style.cssText = 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px';
+  for (const seat of seats) roster.appendChild(seatLineEl(seat, true));
+  hero.appendChild(roster);
+
+  const actions = document.createElement('div');
+  actions.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:16px';
+  const mySeat = seats.find((s) => s.assigned_user_id === state.user?.id);
+  if (mySeat) {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn--ember';
+    btn.type = 'button';
+    btn.dataset.callASub = mySeat.id;
+    btn.dataset.openSheet = 'sheet-callasub';
+    btn.textContent = 'Call a Sub';
+    actions.appendChild(btn);
+  }
+  const ticketLink = document.createElement('a');
+  ticketLink.className = 'btn btn--on-dark';
+  ticketLink.href = 'https://www.ticketmaster.com/';
+  ticketLink.target = '_blank';
+  ticketLink.rel = 'noopener noreferrer';
+  ticketLink.textContent = 'Open Official Ticketing App';
+  actions.appendChild(ticketLink);
+  hero.appendChild(actions);
+}
+
+function pitchStatusPill(seats) {
+  const bench = seats.filter((s) => s.status === 'on_bench');
+  const listed = seats.filter((s) => s.status === 'resale_listed');
+  const span = document.createElement('span');
+  if (bench.length) {
+    span.className = 'badge badge--ember';
+    span.textContent = `${bench.length} seat${bench.length > 1 ? 's' : ''} on the bench`;
+    return span;
+  }
+  if (listed.length) {
+    span.className = 'badge badge--ember';
+    span.textContent = 'Listed outside';
+    return span;
+  }
+  const names = seats.filter((s) => s.assigned_user_id || s.guest_name)
+    .map((s) => s.assigned_user_name || s.guest_name).join(' & ');
+  span.className = 'badge badge--green';
+  span.textContent = names ? `Starting · ${names}` : 'Starting';
+  return span;
+}
+
+function pitchRowEl(fixture, seats) {
+  const mySeat = seats.find((s) => s.assigned_user_id === state.user?.id);
+  const isBench = seats.some((s) => s.status === 'on_bench' || s.status === 'resale_listed');
+
+  const row = document.createElement('article');
+  row.className = 'card';
+  row.dataset.fixtureRow = fixture.id;
+  row.dataset.mine = String(!!mySeat);
+  row.dataset.bench = String(isBench);
+
+  const top = document.createElement('div');
+  top.style.cssText = 'display:flex;justify-content:space-between;gap:10px;align-items:flex-start';
+  const left = document.createElement('div');
+  const eyebrow = document.createElement('p');
+  eyebrow.className = 'eyebrow';
+  eyebrow.textContent = `${matchDateLabel(fixture.kickoff_at)} · ${matchTimeLabel(fixture.kickoff_at)}`;
+  const title = document.createElement('p');
+  title.style.cssText = 'margin:4px 0 0;font-family:var(--font-display);font-weight:700;font-size:17px';
+  title.textContent = `vs ${fixture.opponent}`;
+  const venue = document.createElement('p');
+  venue.style.cssText = 'margin:2px 0 0;font-size:13px;color:var(--ink-mute)';
+  venue.textContent = fixture.venue;
+  left.append(eyebrow, title, venue);
+  top.appendChild(left);
+  const tierBadge = document.createElement('span');
+  const tierLabel = fixture.tier ? fixture.tier[0].toUpperCase() + fixture.tier.slice(1) : 'Standard';
+  tierBadge.className = fixture.tier === 'rivalry' ? 'badge badge--gold' : 'badge badge--mute';
+  tierBadge.textContent = tierLabel;
+  top.appendChild(tierBadge);
+  row.appendChild(top);
+
+  const statusRow = document.createElement('div');
+  statusRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap';
+  for (const seat of seats) statusRow.appendChild(avatarEl(seatHolderLabel(seat), !seat.assigned_user_id && !seat.guest_name));
+  statusRow.appendChild(pitchStatusPill(seats));
+  row.appendChild(statusRow);
+
+  const actions = document.createElement('div');
+  actions.style.cssText = 'display:flex;gap:8px;margin-top:12px;flex-wrap:wrap';
+  let hasAction = false;
+  if (mySeat) {
+    hasAction = true;
+    const btn = document.createElement('button');
+    btn.className = 'btn btn--ghost';
+    btn.type = 'button';
+    btn.dataset.callASub = mySeat.id;
+    btn.dataset.openSheet = 'sheet-callasub';
+    btn.textContent = 'Call a Sub';
+    actions.appendChild(btn);
+  }
+  const openSeat = seats.find((s) => s.status === 'on_bench');
+  if (openSeat) {
+    hasAction = true;
+    const btn = document.createElement('button');
+    btn.className = 'btn btn--primary';
+    btn.type = 'button';
+    btn.dataset.claimSeat = openSeat.id;
+    btn.textContent = 'Take the Pitch';
+    actions.appendChild(btn);
+  }
+  if (hasAction) row.appendChild(actions);
+
+  return row;
+}
+
+function applyPitchFilter() {
+  const active = document.querySelector('[data-role="pitch-filter"][aria-selected="true"]');
+  const v = active ? active.dataset.value : 'all';
+  let visible = 0;
+  document.querySelectorAll('[data-fixture-row]').forEach((row) => {
+    const show = v === 'all' || (v === 'mine' && row.dataset.mine === 'true') || (v === 'bench' && row.dataset.bench === 'true');
+    row.hidden = !show;
+    if (show) visible += 1;
+  });
+  const empty = document.getElementById('pitch-empty');
+  if (empty) {
+    empty.textContent = realFixturesCache.length
+      ? 'Nothing here for this filter.'
+      : 'No fixtures logged for this syndicate yet.';
+    empty.hidden = visible > 0;
+  }
+}
+
+function paintPitchRows() {
+  const container = document.getElementById('pitch-rows');
+  if (!container) return;
+  container.innerHTML = '';
+  for (const { fixture, seats } of realFixturesCache) container.appendChild(pitchRowEl(fixture, seats));
+  applyPitchFilter();
+}
+
+function latestNoteFor(fixtureId, seatNumber) {
+  // realBenchNotesCache is newest-first (see list_bench_notes) -- the first
+  // match is the most recent note about this exact seat.
+  return realBenchNotesCache.find((n) => n.fixture_id === fixtureId && n.seat_number === seatNumber) || null;
+}
+
+function benchCardEl(fixture, seat, claimable) {
+  const note = latestNoteFor(fixture.id, seat.seat_number);
+  const free = !!note && note.cost_path === 'free';
+
+  const card = document.createElement('article');
+  card.className = 'card';
+  card.style.borderLeft = `3px solid ${claimable ? 'var(--summit-sandstone)' : 'var(--hairline-strong)'}`;
+
+  const top = document.createElement('div');
+  top.style.cssText = 'display:flex;justify-content:space-between;gap:10px;align-items:flex-start';
+  const left = document.createElement('div');
+  const eyebrow = document.createElement('p');
+  eyebrow.className = 'eyebrow';
+  eyebrow.textContent = `${matchDateLabel(fixture.kickoff_at)} · ${matchTimeLabel(fixture.kickoff_at)}`;
+  const title = document.createElement('p');
+  title.style.cssText = 'margin:4px 0 0;font-family:var(--font-display);font-weight:700;font-size:17px';
+  title.textContent = `vs ${fixture.opponent}`;
+  const sub = document.createElement('p');
+  sub.style.cssText = 'margin:2px 0 0;font-size:13px;color:var(--ink-mute)';
+  sub.textContent = `Seat ${seat.seat_number}`;
+  left.append(eyebrow, title, sub);
+  top.appendChild(left);
+  if (fixture.tier === 'rivalry') {
+    const badgeEl = document.createElement('span');
+    badgeEl.className = 'badge badge--gold';
+    badgeEl.textContent = 'Rivalry';
+    top.appendChild(badgeEl);
+  }
+  card.appendChild(top);
+
+  if (note) {
+    const noteP = document.createElement('p');
+    noteP.style.cssText = 'margin:10px 0 0;font-size:14px;color:var(--ink-soft)';
+    noteP.textContent = `“${note.body}” — ${note.author_name}`;
+    card.appendChild(noteP);
+  }
+
+  const priceRow = document.createElement('div');
+  priceRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap';
+  const priceBadge = document.createElement('span');
+  if (claimable) {
+    if (free) {
+      priceBadge.className = 'badge badge--gold';
+      priceBadge.textContent = 'On the house';
+    } else {
+      priceBadge.className = 'badge badge--green';
+      priceBadge.textContent = `${moneyCents(note ? note.amount_cents : fixture.weighted_value_cents)} to take it`;
+    }
+  } else {
+    priceBadge.className = 'badge badge--ember';
+    priceBadge.textContent = `Asking ${moneyCents(seat.resale_price_cents ?? fixture.weighted_value_cents)}`;
+  }
+  priceRow.appendChild(priceBadge);
+  card.appendChild(priceRow);
+
+  if (claimable) {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn--primary btn--block';
+    btn.type = 'button';
+    btn.style.marginTop = '12px';
+    btn.dataset.claimSeat = seat.id;
+    btn.textContent = 'Claim from Bench';
+    card.appendChild(btn);
+  } else {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:8px;margin-top:12px;flex-wrap:wrap';
+    const link = document.createElement('a');
+    link.className = 'btn btn--ghost';
+    link.href = 'https://seatgeek.com/';
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = 'View listing';
+    row.appendChild(link);
+    // Only the lister themselves can pull a resale-listed seat back --
+    // update_seat's own permission rules refuse anyone else, so the
+    // button isn't offered to a member it would just 403 for.
+    if (seat.assigned_user_id === state.user?.id) {
+      const pullBtn = document.createElement('button');
+      pullBtn.className = 'btn btn--ghost';
+      pullBtn.type = 'button';
+      pullBtn.dataset.claimSeat = seat.id;
+      pullBtn.textContent = 'Pull it back';
+      row.appendChild(pullBtn);
+    }
+    card.appendChild(row);
+  }
+
+  return card;
+}
+
+function paintBenchLists() {
+  const waitingSection = document.getElementById('bench-waiting');
+  const waitingList = document.getElementById('bench-waiting-list');
+  const listedSection = document.getElementById('bench-listed');
+  const listedList = document.getElementById('bench-listed-list');
+  const emptyEl = document.getElementById('bench-empty');
+  if (!waitingList || !listedList) return;
+
+  waitingList.innerHTML = '';
+  listedList.innerHTML = '';
+  let waitingCount = 0;
+  let listedCount = 0;
+  for (const { fixture, seats } of realFixturesCache) {
+    for (const seat of seats) {
+      if (seat.status === 'on_bench') {
+        waitingList.appendChild(benchCardEl(fixture, seat, true));
+        waitingCount += 1;
+      } else if (seat.status === 'resale_listed') {
+        listedList.appendChild(benchCardEl(fixture, seat, false));
+        listedCount += 1;
+      }
+    }
+  }
+
+  if (waitingSection) waitingSection.hidden = waitingCount === 0;
+  if (listedSection) listedSection.hidden = listedCount === 0;
+  if (emptyEl) emptyEl.hidden = waitingCount > 0 || listedCount > 0;
+}
+
+function benchNoteThreadEl(note, fixture, seat) {
+  const card = document.createElement('article');
+  card.className = 'card';
+
+  const head = document.createElement('div');
+  head.style.cssText = 'display:flex;justify-content:space-between;gap:8px;align-items:flex-start';
+  const who = document.createElement('div');
+  who.style.cssText = 'display:flex;gap:10px';
+  who.appendChild(avatarEl(note.author_name, false));
+  const meta = document.createElement('div');
+  const nameP = document.createElement('p');
+  nameP.style.cssText = 'margin:0;font-weight:600;font-size:14px';
+  nameP.textContent = `${note.author_name} · ${fixture ? fixture.opponent : ''} · Seat ${note.seat_number}`;
+  const whenP = document.createElement('p');
+  whenP.className = 'eyebrow';
+  whenP.style.marginTop = '2px';
+  whenP.textContent = relativeTime(note.posted_at);
+  meta.append(nameP, whenP);
+  who.appendChild(meta);
+  head.appendChild(who);
+  const costBadge = document.createElement('span');
+  costBadge.className = note.cost_path === 'repay' ? 'badge badge--green' : 'badge badge--gold';
+  costBadge.textContent = note.cost_path === 'repay' ? `Get paid back · ${moneyCents(note.amount_cents)}` : 'On the house';
+  head.appendChild(costBadge);
+  card.appendChild(head);
+
+  const bodyP = document.createElement('p');
+  bodyP.style.cssText = 'margin:10px 0 0;font-size:15px';
+  bodyP.textContent = note.body;
+  card.appendChild(bodyP);
+
+  if (note.replies.length) {
+    const repliesBlock = document.createElement('div');
+    repliesBlock.style.cssText = 'margin-top:12px;border-left:2px solid var(--hairline);padding-left:10px';
+    for (const reply of note.replies) {
+      const p = document.createElement('p');
+      p.style.cssText = 'margin:0 0 6px;font-size:14px';
+      const strong = document.createElement('strong');
+      strong.textContent = `${reply.author_name}: `;
+      p.append(strong, document.createTextNode(reply.body));
+      repliesBlock.appendChild(p);
+    }
+    card.appendChild(repliesBlock);
+  }
+
+  const controls = document.createElement('div');
+  controls.style.marginTop = '12px';
+  const quickRow = document.createElement('div');
+  quickRow.className = 'scroll-row';
+  for (const q of QUICK_REPLIES) {
+    const chip = document.createElement('button');
+    chip.className = 'chip';
+    chip.type = 'button';
+    chip.dataset.quickReply = note.id;
+    chip.dataset.text = q;
+    chip.textContent = q;
+    quickRow.appendChild(chip);
+  }
+  controls.appendChild(quickRow);
+
+  const replyRow = document.createElement('div');
+  replyRow.style.cssText = 'display:flex;gap:8px;margin-top:10px';
+  const input = document.createElement('input');
+  input.className = 'input';
+  input.placeholder = 'Reply to the circle';
+  input.setAttribute('aria-label', 'Reply');
+  input.id = `reply-input-${note.id}`;
+  const sendBtn = document.createElement('button');
+  sendBtn.className = 'btn btn--ghost';
+  sendBtn.type = 'button';
+  sendBtn.style.flex = 'none';
+  sendBtn.dataset.role = 'send-reply';
+  sendBtn.dataset.note = note.id;
+  sendBtn.textContent = 'Send';
+  replyRow.append(input, sendBtn);
+  controls.appendChild(replyRow);
+
+  if (seat) {
+    const claimBtn = document.createElement('button');
+    claimBtn.className = 'btn btn--primary btn--block';
+    claimBtn.type = 'button';
+    claimBtn.style.marginTop = '10px';
+    claimBtn.dataset.claimSeat = seat.id;
+    claimBtn.textContent = 'Take the Pitch · ' + (note.cost_path === 'repay' ? moneyCents(note.amount_cents) : 'no cost');
+    controls.appendChild(claimBtn);
+  }
+  card.appendChild(controls);
+
+  return card;
+}
+
+function paintBenchNotesSection() {
+  const section = document.getElementById('bench-notes-section');
+  const list = document.getElementById('bench-notes-list');
+  if (!section || !list) return;
+  list.innerHTML = '';
+
+  // Only a note about a seat that's still actually on the bench has
+  // anything left to act on -- one already claimed or pulled back stays in
+  // realBenchNotesCache (it's still real history) but drops out of this
+  // "needs someone" section.
+  let shown = 0;
+  for (const note of realBenchNotesCache) {
+    const entry = realFixturesCache.find(({ fixture }) => fixture.id === note.fixture_id);
+    const seat = entry?.seats.find((s) => s.seat_number === note.seat_number);
+    if (!seat || seat.status !== 'on_bench') continue;
+    list.appendChild(benchNoteThreadEl(note, entry.fixture, seat));
+    shown += 1;
+  }
+  section.hidden = shown === 0;
+}
+
+function openCallASub(allocationId) {
+  const entry = realFixturesCache.find(({ seats }) => seats.some((s) => s.id === allocationId));
+  if (!entry) return;
+  const seat = entry.seats.find((s) => s.id === allocationId);
+  callASubTarget = {
+    allocationId,
+    fixtureId: entry.fixture.id,
+    seatNumber: seat.seat_number,
+    faceCents: entry.fixture.weighted_value_cents,
+  };
+
+  const contextText = `${entry.fixture.opponent} · Seat ${seat.seat_number}`;
+  for (const id of ['callasub-context', 'release-context', 'guest-context', 'list-context']) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = contextText;
+  }
+  const repayLabel = document.getElementById('cost-repay-label');
+  if (repayLabel) repayLabel.textContent = `Get paid back · ${moneyCents(callASubTarget.faceCents)}`;
+  const askPriceInput = document.getElementById('ask-price');
+  if (askPriceInput) askPriceInput.value = String(Math.round(callASubTarget.faceCents / 100));
+  const releaseNoteInput = document.getElementById('release-note');
+  if (releaseNoteInput) releaseNoteInput.value = '';
+  const guestNameInput = document.getElementById('guest-name');
+  if (guestNameInput) guestNameInput.value = '';
+  for (const id of ['release-error', 'guest-error', 'list-error']) {
+    const el = document.getElementById(id);
+    if (el) el.hidden = true;
+  }
+  openSheet('sheet-callasub');
+}
+
+async function patchSeat(allocationId, payload) {
+  const res = await fetch(`${API_BASE}/api/seats/${allocationId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.sessionToken}` },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'Could not update the seat.');
+  }
+  await paintRealFixtures();
+}
+
+async function claimRealSeat(allocationId) {
+  try {
+    await patchSeat(allocationId, { status: 'confirmed' });
+  } catch {
+    // No dedicated error slot next to every claim/pull-back button spread
+    // across three screens -- the next real paint (which just ran, on
+    // success or not) already shows the truth either way, so a stale click
+    // (someone else just took it) fails silently rather than needing one.
+  }
+}
+
+async function releaseSeatToBench(allocationId, note, costPath, faceCents) {
+  const payload = { status: 'on_bench' };
+  if (note) {
+    payload.note = note;
+    payload.cost_path = costPath;
+    if (costPath === 'repay') payload.amount_cents = faceCents;
+  }
+  await patchSeat(allocationId, payload);
+}
+
+async function giftSeat(allocationId, guestName) {
+  await patchSeat(allocationId, { status: 'gifted', guest_name: guestName });
+}
+
+async function listSeatForResale(allocationId, priceCents) {
+  await patchSeat(allocationId, { status: 'resale_listed', resale_price_cents: priceCents });
+}
+
+async function postBenchNoteReply(noteId, body) {
+  try {
+    const res = await fetch(`${API_BASE}/api/bench-notes/${noteId}/replies`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.sessionToken}` },
+      body: JSON.stringify({ body }),
+    });
+    if (res.ok) await paintRealFixtures();
+  } catch {
+    // offline -- the reply just doesn't show; there is nothing local to
+    // roll back since it was never optimistically added
+  }
 }
 
 async function joinSyndicate(code) {
@@ -811,9 +1336,6 @@ function main() {
   showStage(state.stage);
   showTab(state.tab);
   showSeason(state.season);
-  for (const key of state.claimedSeats) setSeatState(key, 'claimed');
-  for (const key of state.releasedSeats) setSeatState(key, 'released');
-  refreshBenchCount();
   wirePhotoSlots();
   hydratePrefs();
   paintDeviceBanner();
@@ -824,6 +1346,7 @@ function main() {
   loadGuestSlots();
   hydrateProfile();
   paintRealSyndicateDetail();
+  paintRealFixtures();
 
   document.querySelectorAll('.switch[data-pref]').forEach(wireToggle);
   document.getElementById('checkin-time')?.addEventListener('change', paintPreview);
@@ -849,12 +1372,13 @@ function main() {
       return;
     }
 
-    const el = e.target.closest('[data-role],[data-open-sheet],[data-close-sheet],[data-claim-seat],[data-carousel],[data-carousel-dot],[data-cost-choice],[data-quick-reply]');
+    const el = e.target.closest('[data-role],[data-open-sheet],[data-close-sheet],[data-claim-seat],[data-call-a-sub],[data-carousel],[data-carousel-dot],[data-cost-choice],[data-quick-reply]');
     if (!el) return;
 
+    if (el.dataset.callASub) { openCallASub(el.dataset.callASub); return; }
     if (el.dataset.openSheet) { openSheet(el.dataset.openSheet); return; }
     if (el.dataset.closeSheet !== undefined) { closeSheet(); return; }
-    if (el.dataset.claimSeat) { claimSeat(el.dataset.claimSeat, el.dataset.handOff); return; }
+    if (el.dataset.claimSeat) { claimRealSeat(el.dataset.claimSeat); return; }
 
     switch (el.dataset.role) {
       case 'guest-login':
@@ -909,15 +1433,7 @@ function main() {
         return;
       case 'pitch-filter': {
         document.querySelectorAll('[data-role="pitch-filter"]').forEach((c) => c.setAttribute('aria-selected', String(c === el)));
-        const v = el.dataset.value;
-        let visible = 0;
-        document.querySelectorAll('[data-fixture-row]').forEach((row) => {
-          const show = v === 'all' || (v === 'mine' && row.dataset.mine === 'true') || (v === 'bench' && row.dataset.bench === 'true');
-          row.hidden = !show;
-          if (show) visible += 1;
-        });
-        const empty = document.getElementById('pitch-empty');
-        if (empty) empty.hidden = visible > 0;
+        applyPitchFilter();
         return;
       }
       case 'hometeam-filter': {
@@ -981,38 +1497,59 @@ function main() {
         }
         return;
       case 'send-reply': {
-        const input = document.getElementById(`reply-input-${el.dataset.note}`);
-        if (!input) return;
-        addReply(el.dataset.note, input.value);
+        const noteId = el.dataset.note;
+        const input = document.getElementById(`reply-input-${noteId}`);
+        if (!input || !input.value.trim()) return;
+        const text = input.value.trim();
         input.value = '';
+        postBenchNoteReply(noteId, text);
         return;
       }
       case 'post-release': {
-        addBenchNoteCard({
-          fixtureId: el.dataset.fixture,
-          seatNumber: el.dataset.seat,
-          opponent: el.dataset.opponent,
-          short: el.dataset.short,
-          body: document.getElementById(`release-note-${el.dataset.fixture}-${el.dataset.seat}`).value.trim()
-            || 'Seat is open — who wants it?',
-          costPath: document.querySelector(`#sheet-release-${el.dataset.fixture}-${el.dataset.seat} [data-cost-choice][aria-pressed="true"]`)?.dataset.costChoice ?? 'repay',
-          amountCents: Number(el.dataset.faceCents),
-        });
-        releaseSeat(`${el.dataset.fixture}-${el.dataset.seat}`, 'released');
-        closeSheet();
+        if (!callASubTarget) return;
+        const errorEl = document.getElementById('release-error');
+        if (errorEl) errorEl.hidden = true;
+        const note = document.getElementById('release-note').value.trim();
+        const costPath = document.querySelector('#sheet-release [data-cost-choice][aria-pressed="true"]')?.dataset.costChoice ?? 'repay';
+        el.disabled = true;
+        releaseSeatToBench(callASubTarget.allocationId, note, costPath, callASubTarget.faceCents)
+          .then(() => closeSheet())
+          .catch((err) => { if (errorEl) { errorEl.textContent = err.message; errorEl.hidden = false; } })
+          .finally(() => { el.disabled = false; });
         return;
       }
-      case 'post-guest':
-        // Guest name / list price are free text with no further screen that
-        // needs to reflect them beyond the hero, so releasing the seat is
-        // the whole state change.
-        releaseSeat(el.dataset.seat, 'gifted');
-        closeSheet();
+      case 'post-guest': {
+        if (!callASubTarget) return;
+        const errorEl = document.getElementById('guest-error');
+        if (errorEl) errorEl.hidden = true;
+        const guestName = document.getElementById('guest-name').value.trim();
+        if (!guestName) {
+          if (errorEl) { errorEl.textContent = 'Enter who is taking the seat.'; errorEl.hidden = false; }
+          return;
+        }
+        el.disabled = true;
+        giftSeat(callASubTarget.allocationId, guestName)
+          .then(() => closeSheet())
+          .catch((err) => { if (errorEl) { errorEl.textContent = err.message; errorEl.hidden = false; } })
+          .finally(() => { el.disabled = false; });
         return;
-      case 'post-list':
-        releaseSeat(el.dataset.seat, 'listed');
-        closeSheet();
+      }
+      case 'post-list': {
+        if (!callASubTarget) return;
+        const errorEl = document.getElementById('list-error');
+        if (errorEl) errorEl.hidden = true;
+        const askDollars = Number(document.getElementById('ask-price').value);
+        if (!askDollars || askDollars <= 0) {
+          if (errorEl) { errorEl.textContent = 'Enter a target face value first.'; errorEl.hidden = false; }
+          return;
+        }
+        el.disabled = true;
+        listSeatForResale(callASubTarget.allocationId, Math.round(askDollars * 100))
+          .then(() => closeSheet())
+          .catch((err) => { if (errorEl) { errorEl.textContent = err.message; errorEl.hidden = false; } })
+          .finally(() => { el.disabled = false; });
         return;
+      }
     }
 
     if (el.dataset.costChoice) {
@@ -1027,7 +1564,7 @@ function main() {
     }
 
     if (el.dataset.quickReply) {
-      addReply(el.dataset.quickReply, el.dataset.text);
+      postBenchNoteReply(el.dataset.quickReply, el.dataset.text);
       return;
     }
 

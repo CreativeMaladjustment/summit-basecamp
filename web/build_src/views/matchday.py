@@ -1,59 +1,42 @@
 """Matchday: the next-fixture hero, Summit Touchline carousel, bench-note
-threads and the balance strip. Every seat state that a claim/release can
-reach is pre-rendered here; src/app.js only toggles which one shows.
+threads and the balance strip.
+
+The hero, bench notes and balance strip are real per-syndicate data (which
+fixture is next, who holds which seat, real bench notes) that does not
+exist until a real syndicate does, so none of it can be pre-rendered at
+build time the way the rest of this static site is -- web/src/app.js's
+paintRealFixtures() builds it at runtime from GET /api/groups/{id}/fixtures,
+.../bench-notes and the seat/ledger data paintRealSyndicateDetail already
+fetched. This module only emits the empty shell those functions fill in.
+The Summit Touchline carousel is unrelated daily content (trivia/player/
+tactics notes), not fixture data, and stays fully pre-rendered.
 """
 from __future__ import annotations
 
 from markup import h, Raw
 from icons import svg
-from components import avatar, badge
-from fmt import money, match_date, match_time, relative
-from data import MEMBERS, ME, TOUCHLINE_NOTES, QUICK_REPLIES
-from seats import seat_pair, claim_button
+from components import badge
+from data import TOUCHLINE_NOTES
 
 
-def render(fixture, bench_notes, my_balance_cents):
+def render():
     return h(
         "div", {"cls": "view shell", "style": {"paddingTop": "16px"}, "data-tab": "matchday"},
         h("div", {"cls": "grid-auto", "style": {"gridTemplateColumns": "repeat(auto-fit, minmax(320px, 1fr))"}},
-          hero_card(fixture) if fixture else h("div", {"cls": "card"}, "No fixtures left this season."),
+          h("article", {"id": "matchday-hero", "cls": "card"},
+            h("p", {"style": {"margin": "0", "color": "var(--ink-mute)"}}, "Loading your next match…")),
           touchline_notes_card()),
-        h("section", {"style": {"marginTop": "12px"}, "id": "bench-notes-section",
-                       "hidden": not bench_notes},
+        h("section", {"style": {"marginTop": "12px"}, "id": "bench-notes-section", "hidden": True},
           h("h2", {"style": {"fontSize": "15px", "margin": "0 0 8px"}}, "Bench notes"),
-          h("div", {"cls": "grid-auto", "id": "bench-notes-list"},
-            [note_thread(n, bench_notes) for n in bench_notes])),
-        balance_strip(my_balance_cents),
-    )
-
-
-def hero_card(f):
-    my_seat = next((s for s in f["seats"] if s["holder"] == ME), None)
-
-    roster = h(
-        "div", {"style": {"display": "flex", "alignItems": "center", "gap": "10px", "flexWrap": "wrap", "marginTop": "14px"}},
-        [seat_pair(f, seat, lg=True, on_dark=True) for seat in f["seats"]],
-    )
-
-    return h(
-        "article", {"style": {
-            "borderRadius": "var(--radius-lg)", "overflow": "hidden", "background": "#134E48", "color": "#fff",
-            "borderTop": "3px solid #C84B31", "padding": "18px 16px", "animation": "ssUp .3s ease both"}},
-        h("div", {"style": {"display": "flex", "justifyContent": "space-between", "gap": "10px", "alignItems": "flex-start"}},
-          h("div", None,
-            h("p", {"cls": "eyebrow", "style": {"color": "rgba(255,255,255,.66)"}}, "Next match"),
-            h("h2", {"style": {"fontSize": "24px", "fontWeight": "800", "marginTop": "4px", "color": "#fff"}},
-              f'Summit vs {f["opponent"]}'),
-            h("p", {"style": {"margin": "6px 0 0", "fontSize": "14px", "color": "rgba(255,255,255,.8)"}},
-              f'{match_date(f["kickoff"])} · {match_time(f["kickoff"])} · {f["venue"]}')),
-          badge("Rivalry", "gold") if f["tier"] == "rivalry" else None),
-        h("p", {"cls": "eyebrow", "style": {"color": "rgba(255,255,255,.66)", "marginTop": "16px"}}, "Taking the pitch"),
-        roster,
-        h("div", {"style": {"display": "flex", "gap": "8px", "flexWrap": "wrap", "marginTop": "16px"}},
-          h("button", {"cls": "btn btn--ember", "type": "button", "data-open-sheet": f'sheet-callasub-{f["id"]}-{my_seat["number"]}'},
-            "Call a Sub") if my_seat else None,
-          h("a", {"cls": "btn btn--on-dark", "href": "https://www.ticketmaster.com/", "target": "_blank",
-                   "rel": "noopener noreferrer"}, Raw(svg("external", size=16)), "Open Official Ticketing App")),
+          h("div", {"cls": "grid-auto", "id": "bench-notes-list"})),
+        h("button", {"cls": "card", "type": "button", "id": "matchday-balance-strip", "style": {
+            "marginTop": "12px", "width": "100%", "textAlign": "left", "cursor": "pointer",
+            "borderLeft": "3px solid var(--summit-sunshine)", "display": "flex", "alignItems": "center",
+            "justifyContent": "space-between", "gap": "12px"}, "data-role": "goto-hearth", "hidden": True},
+          h("div", None, h("p", {"cls": "eyebrow"}, "The 14ers"),
+            h("p", {"data-role": "matchday-balance-text", "style": {
+                "margin": "4px 0 0", "fontFamily": "var(--font-display)", "fontWeight": "700", "fontSize": "16px"}})),
+          Raw(svg("arrowRight", size=18))),
     )
 
 
@@ -122,74 +105,4 @@ def _note_body(note):
                 "data-role": "trivia-answer"}, note["answer"]),
         h("button", {"cls": "btn btn--ghost btn--block", "type": "button", "style": {"marginTop": "10px"},
                      "aria-expanded": "false", "data-role": "trivia-toggle"}, "Tap to reveal"),
-    )
-
-
-def note_thread(note, all_notes):
-    from data import FIXTURES
-    fixture = next((f for f in FIXTURES if f["id"] == note["fixture_id"]), None)
-    seat = next((s for s in fixture["seats"] if s["number"] == note["seat_number"]), None) if fixture else None
-    author = MEMBERS[note["author_id"]]
-    taken = seat is not None and seat["status"] == "confirmed"
-    seat_key = f'{note["fixture_id"]}-{note["seat_number"]}'
-
-    replies_block = h(
-        "div", {"style": {"marginTop": "12px", "borderLeft": "2px solid var(--hairline)", "paddingLeft": "10px"},
-                 "id": f'replies-{note["id"]}', "hidden": not note["replies"]},
-        [h("p", {"style": {"margin": "0 0 6px", "fontSize": "14px"}},
-           h("strong", None, f'{MEMBERS.get(r["author_id"], {}).get("name", "Someone")}: '), r["body"])
-         for r in note["replies"]],
-    )
-
-    taken_line = h(
-        "p", {"style": {"margin": "12px 0 0", "fontSize": "14px", "color": "var(--summit-green)", "fontWeight": "600"},
-              "id": f'taken-line-{note["id"]}', "hidden": not taken},
-        f'{MEMBERS.get(seat["holder"], {}).get("name", "Someone") if taken else ""} took the seat.',
-    )
-
-    active_controls = h(
-        "div", {"id": f'active-controls-{note["id"]}', "hidden": taken},
-        h("div", {"cls": "scroll-row", "style": {"marginTop": "12px"}},
-          [h("button", {"cls": "chip", "type": "button", "data-quick-reply": note["id"], "data-text": q}, q)
-           for q in QUICK_REPLIES]),
-        h("div", {"style": {"display": "flex", "gap": "8px", "marginTop": "10px"}},
-          h("input", {"cls": "input", "placeholder": "Reply to the circle", "aria-label": "Reply",
-                       "id": f'reply-input-{note["id"]}'}),
-          h("button", {"cls": "btn btn--ghost", "type": "button", "style": {"flex": "none"},
-                       "data-role": "send-reply", "data-note": note["id"]}, "Send")),
-        claim_button(
-            "Take the Pitch · " + (money(note["amount_cents"]) if note["cost_path"] == "repay" else "no cost"),
-            seat_key, cls="btn btn--primary btn--block", style={"marginTop": "10px"},
-            extra={"data-hand-off": note["id"]},
-        ),
-    )
-
-    return h(
-        "article", {"cls": "card", "id": f'note-{note["id"]}', "data-note-card": note["id"]},
-        h("div", {"style": {"display": "flex", "justifyContent": "space-between", "gap": "8px", "alignItems": "flex-start"}},
-          h("div", {"style": {"display": "flex", "gap": "10px"}},
-            avatar(note["author_id"]),
-            h("div", None,
-              h("p", {"style": {"margin": "0", "fontWeight": "600", "fontSize": "14px"}},
-                f'{author["name"]} · {fixture["short"] if fixture else ""} · Seat {note["seat_number"]}'),
-              h("p", {"cls": "eyebrow", "style": {"marginTop": "2px"}}, relative(note["posted_at"]))),
-            ),
-          badge(f'Get paid back · {money(note["amount_cents"])}', "green") if note["cost_path"] == "repay" else badge("On the house", "gold")),
-        h("p", {"style": {"margin": "10px 0 0", "fontSize": "15px"}}, note["body"]),
-        replies_block, taken_line, active_controls,
-    )
-
-
-def balance_strip(cents):
-    line = "All square with the 14ers." if cents == 0 else (
-        f"The circle holds your {money(cents)}." if cents > 0 else f"You hold the tab ({money(abs(cents))})."
-    )
-    return h(
-        "button", {"cls": "card", "type": "button", "style": {
-            "marginTop": "12px", "width": "100%", "textAlign": "left", "cursor": "pointer",
-            "borderLeft": "3px solid var(--summit-sunshine)", "display": "flex", "alignItems": "center",
-            "justifyContent": "space-between", "gap": "12px"}, "data-role": "goto-hearth"},
-        h("div", None, h("p", {"cls": "eyebrow"}, "The 14ers"),
-          h("p", {"style": {"margin": "4px 0 0", "fontFamily": "var(--font-display)", "fontWeight": "700", "fontSize": "16px"}}, line)),
-        Raw(svg("arrowRight", size=18)),
     )

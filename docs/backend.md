@@ -30,6 +30,7 @@ profile picture is nowhere near KV's 25 MiB per-value limit.
 | `migrations/0009_user_contact_info.sql` | `users.phone`, `users.contact_email`, backing `PATCH /api/me` |
 | `migrations/0010_guest_password_auth.sql` | Seeds the six shared-password guest slots (`usr_guest1`..`usr_guest6`) sign-in uses |
 | `migrations/0011_syndicate_seat_labels.sql` | `groups.section`/`seat_row`/`seat_labels`, `group_members.seat_label` -- the real physical seats behind a syndicate, distinct from the internal 1..`total_seats` seat numbering |
+| `migrations/0012_bench_notes.sql` | `bench_notes` and `bench_note_replies` -- what "Release to the Bench" posts to the circle, and its replies; previously client-only and never persisted |
 | `seed/dev_seed.sql` | Four members, two fixtures, a part-paid ledger, the squad and all 15 opponent dossiers -- dev only, not safe to run against production (see below); DELETE-then-INSERT throughout, so rerunning it against the same database is a full reset |
 | `seed/roster_seed.sql` | Just the real home roster, safe to run against production (`wrangler d1 execute ... --remote --file=seed/roster_seed.sql`) as a one-off; the sync job is the ongoing way this table gets updated |
 | `seed/opponents_seed.sql` | All 15 real opponent dossiers, safe to run against production -- **not** just an optional bootstrap like the other two seeds; the sync job never creates an opponent row from nothing, only updates ones this file (or an equivalent) already put there. Idempotent (`INSERT ... ON CONFLICT DO UPDATE`, never a DELETE), so rerunning it -- to add a club or fix a typo -- never wipes sync-owned `opponent_players` rows or an admin's hand-edited `form`/`shape_note` |
@@ -84,6 +85,8 @@ curl -H 'X-Dev-User: usr_ada' http://localhost:8787/api/groups
 | GET | `/api/fixtures/{id}/seats` | The seat map for one fixture |
 | PATCH | `/api/seats/{id}` | Claim, bench, gift, or list a seat for resale (holder); reassign or edit any seat regardless of holder (admin) |
 | GET | `/api/groups/{id}/listings` | Upcoming seats going spare |
+| GET | `/api/groups/{id}/bench-notes` | Every bench note across the syndicate's fixtures, replies included |
+| POST | `/api/bench-notes/{id}/replies` | Reply to a bench note |
 | GET | `/api/groups/{id}/ledger` | Unsettled transactions, net balances, settle plan |
 | POST | `/api/groups/{id}/expenses` | Record an expense and split it |
 | POST | `/api/groups/{id}/settle` | Mark the debts with one member settled |
@@ -411,24 +414,16 @@ wrongly-skipped one just never appears at all.
 - **Weighted payouts.** `split_equally` splits an expense evenly. Weighting by
   fixture tier and crediting members who bench a seat are still being decided;
   when they land, that one function changes.
-- **The frontend calls this API from three screens.** `web/index.html` is
-  still a static build (`web/build_src/build.py`) from mock data in
-  `web/build_src/data.py`, and `web/src/app.js` still mostly just toggles
-  pre-rendered DOM. Sign-in, "Find your syndicate," and the Settings profile
-  card are the real exceptions -- `POST /api/auth/session`,
-  `GET /api/auth/guests`, `PATCH /api/me`, `POST /api/groups` and
-  `POST /api/groups/join` are all reachable from the deployed site, using
-  `API_BASE` (`app.js`, hardcoded to the Worker's own hostname -- update it
-  by hand the same way `CF_API_BASE_URL` already needs updating on a Worker
-  rename, see `docs/deploy.md`). Creating or joining a syndicate this way is
-  real -- it lands in D1, and the creator is genuinely its admin -- but
-  nothing else in this static build resizes to match it: Matchday, the 14er
-  Pass, the Bench and the 14ers ledger all still render the same fixed mock
-  fixtures/seats/ledger regardless of which real group `state.groupId` names.
-  Every other endpoint above -- fixtures, seats, the ledger, avatar upload --
-  is real and tested (`tests/test_api.py`) but still not reachable from the
-  deployed site; wiring each of those screens up to real data is still its
-  own piece of work, not something this change set attempts to close.
+- **Home Team and Visitors still render mock data.** `web/index.html` is a
+  static build (`web/build_src/build.py`); every other screen -- sign-in,
+  "Find your syndicate," Settings, the header, Matchday, the 14er Pass, the
+  Bench and the 14ers ledger -- is wired to this API at runtime by
+  `web/src/app.js`'s `paintRealSyndicateDetail`/`paintRealFixtures`, using
+  `API_BASE` (hardcoded to the Worker's own hostname -- update it by hand
+  the same way `CF_API_BASE_URL` already needs updating on a Worker rename,
+  see `docs/deploy.md`). Home Team (`GET /api/roster`) and Visitors
+  (`GET /api/opponents`) are the two screens left rendering
+  `web/build_src/data.py`'s placeholder roster/opponent content instead.
 
 ## Testing
 

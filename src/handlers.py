@@ -810,6 +810,28 @@ async def update_seat(request, env, params):
     else:
         resale_price_cents = None
 
+    # Releasing to the bench can carry a note to the circle -- optional (a
+    # seat can still be benched with nothing said), and only meaningful for
+    # this one transition: a note posted about a seat that isn't actually
+    # going up for grabs would be misleading, and nothing else here has
+    # anywhere to show it.
+    note_body = None
+    if status == "on_bench":
+        note_body = _optional_text(body, "note")
+    bench_note_write = None
+    if note_body is not None:
+        cost_path = body.get("cost_path", "repay")
+        if cost_path not in ("repay", "free"):
+            raise ApiError(400, "cost_path must be one of: repay, free")
+        amount_cents = require_int(body, "amount_cents", minimum=0) if cost_path == "repay" else None
+        bench_note_write = (
+            """
+            INSERT INTO bench_notes (id, fixture_id, seat_number, author_id, cost_path, amount_cents, body)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (new_id("note"), fixture["id"], seat["seat_number"], user["id"], cost_path, amount_cents, note_body),
+        )
+
     changed = await _write_seat_if_unchanged(
         env, seat, status, assigned_user_id, body.get("guest_name"), resale_price_cents
     )
@@ -817,6 +839,8 @@ async def update_seat(request, env, params):
         raise ApiError(
             409, "This seat changed since you last looked at it -- refresh and retry"
         )
+    if bench_note_write is not None:
+        await batch(env, [bench_note_write])
     updated = await query_one(
         env, "SELECT * FROM seat_allocations WHERE id = ?", seat["id"]
     )
@@ -874,6 +898,94 @@ async def list_listings(request, env, params):
         group_id,
     )
     return json_response({"listings": listings})
+
+
+async def list_bench_notes(request, env, params):
+    """Every bench note across a syndicate's fixtures, replies included --
+    what Matchday's "Bench notes" section and the Bench screen's threads are
+    drawn from. Newest first, matching a social-feed reading order. A note
+    itself is only ever created by update_seat (releasing a seat to the
+    bench), not here -- this is the read side."""
+    user = await current_user(request, env)
+    group_id = params["group_id"]
+    await require_membership(env, group_id, user["id"])
+
+    notes = await query(
+        env,
+        """
+        SELECT n.*, u.name AS author_name
+        FROM bench_notes n
+        JOIN fixtures f ON f.id = n.fixture_id
+        JOIN users u ON u.id = n.author_id
+        WHERE f.group_id = ?
+        ORDER BY n.posted_at DESC
+        """,
+        group_id,
+    )
+    replies = await query(
+        env,
+        """
+        SELECT r.*, u.name AS author_name
+        FROM bench_note_replies r
+        JOIN bench_notes n ON n.id = r.note_id
+        JOIN fixtures f ON f.id = n.fixture_id
+        JOIN users u ON u.id = r.author_id
+        WHERE f.group_id = ?
+        ORDER BY r.posted_at
+        """,
+        group_id,
+    )
+    replies_by_note = {}
+    for reply in replies:
+        replies_by_note.setdefault(reply["note_id"], []).append(reply)
+    for note in notes:
+        note["replies"] = replies_by_note.get(note["id"], [])
+
+    return json_response({"notes": notes})
+
+
+async def create_bench_note_reply(request, env, params):
+    """Reply to a bench note -- anyone in the syndicate, not just the
+    original poster or the eventual seat-taker."""
+    user = await current_user(request, env)
+    note_id = params["note_id"]
+    body = await read_json(request)
+    (reply_body,) = require(body, "body")
+
+    note = await query_one(
+        env,
+        """
+        SELECT n.id, f.group_id
+        FROM bench_notes n
+        JOIN fixtures f ON f.id = n.fixture_id
+        WHERE n.id = ?
+        """,
+        note_id,
+    )
+    if note is None:
+        raise ApiError(404, "No such bench note")
+    await require_membership(env, note["group_id"], user["id"])
+
+    reply_id = new_id("reply")
+    await execute(
+        env,
+        "INSERT INTO bench_note_replies (id, note_id, author_id, body) VALUES (?, ?, ?, ?)",
+        reply_id,
+        note_id,
+        user["id"],
+        reply_body,
+    )
+    reply = await query_one(
+        env,
+        """
+        SELECT r.*, u.name AS author_name
+        FROM bench_note_replies r
+        JOIN users u ON u.id = r.author_id
+        WHERE r.id = ?
+        """,
+        reply_id,
+    )
+    return json_response({"reply": reply}, status=201)
 
 
 async def _fixture_for_member(env, fixture_id, user_id):

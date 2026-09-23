@@ -1,22 +1,22 @@
 """The 14er Pass: every home fixture, filtered by All / My Matches / On the
-Bench. Filtering hides pre-rendered rows by a data attribute — src/app.js
-never rebuilds a row.
+Bench.
+
+Which fixtures exist, and who holds which seat, is real per-syndicate data
+that does not exist at build time -- web/src/app.js's paintRealFixtures()
+builds each row into #pitch-rows from GET /api/groups/{id}/fixtures and
+.../fixtures/{id}/seats, carrying the same data-fixture-row/data-mine/
+data-bench attributes the filter chips below already look for, so the
+existing pitch-filter click handler in app.js needs no changes. This module
+only emits the filter chips and the empty shell those rows fill.
 """
 from __future__ import annotations
 
-import sys, os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from markup import h
-from components import badge
-from fmt import match_date, match_time
-from data import MEMBERS, TIERS, ME
-from seats import seat_avatar_toggle, claim_button, seat_key, is_claimable
 
 FILTERS = [("all", "All Fixtures"), ("mine", "My Matches"), ("bench", "On the Bench")]
 
 
-def render(fixtures):
+def render():
     return h(
         "div", {"cls": "view shell", "style": {"paddingTop": "16px"}, "data-tab": "pitch"},
         h("h1", {"style": {"fontSize": "22px", "fontWeight": "800"}}, "The 14er Pass"),
@@ -26,61 +26,7 @@ def render(fixtures):
           [h("button", {"cls": "chip", "type": "button", "role": "tab",
                         "aria-selected": "true" if v == "all" else "false",
                         "data-role": "pitch-filter", "data-value": v}, label) for v, label in FILTERS]),
-        h("div", {"cls": "grid-auto", "style": {"marginTop": "12px"}, "id": "pitch-rows"},
-          [fixture_row(f) for f in fixtures]) if fixtures else
-          h("p", {"cls": "card", "style": {"marginTop": "12px", "color": "var(--ink-mute)"}}, "No fixtures this season."),
-        h("p", {"cls": "card", "style": {"marginTop": "12px", "color": "var(--ink-mute)"}, "id": "pitch-empty", "hidden": True},
-          "Nothing here for this filter."),
-    )
-
-
-def status_pill(f):
-    bench = [s for s in f["seats"] if s["status"] == "bench"]
-    listed = [s for s in f["seats"] if s["status"] == "listed"]
-    if bench:
-        n = len(bench)
-        return badge(f'{n} seat{"s" if n > 1 else ""} on the bench', "ember")
-    if listed:
-        return badge("Listed outside", "ember")
-    names = " & ".join(
-        MEMBERS[s["holder"]]["name"] if s["holder"] else s.get("guest_name")
-        for s in f["seats"] if s["holder"] or s.get("guest_name")
-    )
-    return badge(f"Starting · {names}", "green")
-
-
-def fixture_row(f):
-    my_seat = next((s for s in f["seats"] if s["holder"] == ME), None)
-    open_seat = next((s for s in f["seats"] if s["status"] == "bench"), None)
-    is_mine = "true" if my_seat else "false"
-    is_bench = "true" if any(is_claimable(s) for s in f["seats"]) else "false"
-
-    actions = []
-    if my_seat:
-        my_key = seat_key(f["id"], my_seat["number"])
-        actions.append(h(
-            "span", None,
-            h("span", {"data-seat": my_key, "data-state": "held"},
-              h("button", {"cls": "btn btn--ghost", "type": "button",
-                            "data-open-sheet": f'sheet-callasub-{f["id"]}-{my_seat["number"]}'}, "Call a Sub")),
-            h("span", {"data-seat": my_key, "data-state": "released", "hidden": True},
-              badge("Handed off — see the Bench", "mute")),
-        ))
-    if open_seat:
-        actions.append(claim_button("Take the Pitch", seat_key(f["id"], open_seat["number"]), cls="btn btn--primary"))
-
-    return h(
-        "article", {"cls": "card", "data-fixture-row": f["id"], "data-mine": is_mine, "data-bench": is_bench},
-        h("div", {"style": {"display": "flex", "justifyContent": "space-between", "gap": "10px", "alignItems": "flex-start"}},
-          h("div", None,
-            h("p", {"cls": "eyebrow"}, f'{match_date(f["kickoff"])} · {match_time(f["kickoff"])}'),
-            h("p", {"style": {"margin": "4px 0 0", "fontFamily": "var(--font-display)", "fontWeight": "700", "fontSize": "17px"}},
-              f'vs {f["opponent"]}'),
-            h("p", {"style": {"margin": "2px 0 0", "fontSize": "13px", "color": "var(--ink-mute)"}}, f["venue"])),
-          badge("Rivalry", "gold") if f["tier"] == "rivalry" else badge(TIERS[f["tier"]]["label"], "mute")),
-        h("div", {"style": {"display": "flex", "alignItems": "center", "gap": "8px", "marginTop": "12px", "flexWrap": "wrap"},
-                   "id": f'pitch-status-{f["id"]}'},
-          [seat_avatar_toggle(f, s) for s in f["seats"]], status_pill(f)),
-        h("div", {"style": {"display": "flex", "gap": "8px", "marginTop": "12px", "flexWrap": "wrap"}}, actions)
-          if actions else None,
+        h("div", {"cls": "grid-auto", "style": {"marginTop": "12px"}, "id": "pitch-rows"}),
+        h("p", {"cls": "card", "style": {"marginTop": "12px", "color": "var(--ink-mute)"}, "id": "pitch-empty"},
+          "No fixtures logged for this syndicate yet."),
     )
