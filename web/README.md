@@ -103,11 +103,15 @@ library's `html` module — the same reasoning as the backend's own
 Everything the app shows comes from `build_src/data.py`, baked into
 `index.html` at build time. `src/app.js` holds only the runtime state that
 can change after a click — the current tab, which seats are claimed, sheet
-contents typed in, dropped photos — persisted to `localStorage`. Sign-in is
-the one real API integration: it calls the deployed Worker
-(`POST /api/auth/session`, `GET /api/auth/guests`, `PATCH /api/me` — see
-`docs/backend.md` "Sign-in") rather than just setting a local flag. Player
-names, jersey numbers, stats and fixture dates are invented placeholders —
+contents typed in, dropped photos — persisted to `localStorage`. Three
+screens are real API integrations rather than just local state: sign-in
+(`POST /api/auth/session`, `GET /api/auth/guests` — see `docs/backend.md`
+"Sign-in"), "Find your syndicate" (`POST /api/groups`,
+`POST /api/groups/join` — a syndicate created or joined there is a real
+row in D1), and the Settings profile card's name/phone/email fields, each
+saving independently via `PATCH /api/me`. Every other screen still renders
+from mock data regardless of which real syndicate `state.groupId` names.
+Player names, jersey numbers, stats and fixture dates are invented placeholders —
 swap in the real roster and the published fixture list when they exist, and
 point the club bio links at real URLs.
 

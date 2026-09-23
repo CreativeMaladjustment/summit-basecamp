@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from markup import h
 from layout import lockup, sheet_template
 from components import badge
-from data import SYNDICATES, TOUCHLINE_NOTES
+from data import TOUCHLINE_NOTES
 
 
 def landing():
@@ -28,23 +28,23 @@ def landing():
           h("p", {"cls": "eyebrow", "style": {"marginTop": "28px"}}, "Tonight on the Touchline"),
           h("div", {"style": {"marginTop": "10px"}}, [teaser(n) for n in TOUCHLINE_NOTES]),
           h("div", {"cls": "card", "style": {"marginTop": "24px"}},
-            h("label", {"cls": "field"},
-              h("span", {"cls": "field__label"}, "Site password"),
-              h("input", {"cls": "input", "type": "password", "id": "site-password",
-                          "placeholder": "Ask whoever runs the syndicate", "autocomplete": "current-password"})),
-            h("label", {"cls": "field", "style": {"marginTop": "10px"}},
-              h("span", {"cls": "field__label"}, "Your name (optional)"),
-              h("input", {"cls": "input", "id": "site-display-name",
-                          "placeholder": "Replaces the Guest label below, for good"})),
+            h("div", {"id": "password-field"},
+              h("label", {"cls": "field"},
+                h("span", {"cls": "field__label"}, "Site password"),
+                h("input", {"cls": "input", "type": "password", "id": "site-password",
+                            "placeholder": "Ask whoever runs the syndicate", "autocomplete": "current-password"}))),
             h("p", {"cls": "field__label", "style": {"marginTop": "16px"}}, "Pick your login"),
-            h("div", {"id": "guest-slots", "style": {"marginTop": "8px", "display": "grid", "gap": "8px"}},
+            h("div", {"id": "guest-slots", "style": {
+                "marginTop": "8px", "display": "grid",
+                "gridTemplateColumns": "repeat(3, 1fr)", "gap": "8px"}},
               [h("button", {"cls": "btn btn--ghost btn--block", "type": "button",
                             "data-role": "guest-login", "data-guest-id": f"usr_guest{n}"},
                  f"Guest {n}") for n in range(1, 7)]),
             h("p", {"id": "sign-in-error", "role": "alert", "hidden": True, "style": {
                 "margin": "10px 0 0", "fontSize": "13px", "color": "var(--summit-sandstone)", "textAlign": "center"}})),
           h("p", {"style": {"margin": "14px 0 0", "fontSize": "13px", "color": "var(--ink-mute)", "textAlign": "center"}},
-            "Six shared logins, one password. Type a name first and it replaces your Guest label for good.")),
+            "Six shared logins, one password -- remembered on this device after the first time. "
+            "Pick yours below; set your name from Campfire Settings once you're in.")),
     )
 
 
@@ -81,28 +81,30 @@ def syndicate():
             h("label", {"cls": "field__label", "for": "invite"}, "Invite code"),
             h("input", {"cls": "input", "id": "invite", "placeholder": "e.g. NORTH-114"}),
             h("button", {"cls": "btn btn--primary btn--block", "type": "button", "style": {"marginTop": "10px"},
-                         "data-role": "join-syndicate", "data-syndicate": SYNDICATES[0]["id"]}, "Join with code")),
+                         "data-role": "join-syndicate"}, "Join with code"),
+            h("p", {"id": "join-syndicate-error", "role": "alert", "hidden": True, "style": {
+                "margin": "10px 0 0", "fontSize": "13px", "color": "var(--summit-sandstone)", "textAlign": "center"}})),
           h("button", {"cls": "btn btn--ghost btn--block", "type": "button", "style": {"marginTop": "10px"},
                        "data-open-sheet": "sheet-new-syndicate"}, "Start a new syndicate")),
     )
 
 
 def new_syndicate_sheet():
-    """The one part of this static build a member can actually create
-    something with, rather than just toggle a pre-rendered state: name,
-    season, total seats and package cost, the same shape POST /api/groups
-    already takes. Only the name goes anywhere beyond this sheet -- every
-    fixture, seat and ledger figure elsewhere in the app is fixed mock data
-    keyed to a specific seat count and price, so resizing either from here
-    would need those recomputed for real, not just relabeled. Said plainly
-    in the sheet's own copy rather than quietly ignoring what was typed."""
+    """Submits to the real POST /api/groups -- name, season, total seats and
+    package cost all land in D1, same as everything else this sheet's own
+    fields take. What doesn't follow: every fixture, seat and ledger figure
+    shown elsewhere in this static build is still fixed mock data keyed to
+    a specific seat count and price (web/build_src/data.py), unconnected to
+    whatever group this creates -- resizing those for real is its own,
+    larger piece of work. Said plainly in the sheet's own copy rather than
+    quietly implying more than lands."""
     return sheet_template("sheet-new-syndicate", [
         h("p", {"cls": "eyebrow"}, "Find your syndicate"),
         h("h2", {"cls": "sheet__title"}, "Start a new syndicate"),
         h("p", {"cls": "sheet__sub"},
-          "Season, total seats and package cost preview what setting one up will "
-          "look like -- the demo schedule and ledger elsewhere in this app don't "
-          "resize from them yet. The name does carry through everywhere it's shown."),
+          "Creates a real syndicate you're the admin of. The demo schedule "
+          "and ledger elsewhere in this app don't resize to match it yet -- "
+          "only the name, season, seats and cost themselves are real."),
         h("form", {"id": "new-syndicate-form"},
           h("label", {"cls": "field"},
             h("span", {"cls": "field__label"}, "Syndicate name"),
@@ -118,7 +120,9 @@ def new_syndicate_sheet():
             h("span", {"cls": "field__label"}, "Package cost"),
             h("input", {"cls": "input", "type": "number", "id": "new-syn-cost", "placeholder": "2480.00", "min": "0", "step": "0.01"})),
           h("button", {"cls": "btn btn--primary btn--block", "type": "submit", "style": {"marginTop": "6px"}},
-            "Create syndicate")),
+            "Create syndicate"),
+          h("p", {"id": "new-syndicate-error", "role": "alert", "hidden": True, "style": {
+              "margin": "10px 0 0", "fontSize": "13px", "color": "var(--summit-sandstone)", "textAlign": "center"}})),
         h("button", {"cls": "btn btn--ghost btn--block", "type": "button", "style": {"marginTop": "8px"},
                      "data-close-sheet": "true"}, "Never mind"),
     ])

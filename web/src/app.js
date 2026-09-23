@@ -33,11 +33,12 @@ const state = Object.assign({
   season: '2026',
   claimedSeats: [],         // seat keys claimed from the bench
   releasedSeats: [],        // seats you gave up via Call a Sub
-  syndicateName: null,      // set once "Start a new syndicate" is submitted
+  syndicateName: null,      // set once "Start a new syndicate" or "Join with code" succeeds
+  groupId: null,             // the real POST /api/groups(/join) id behind syndicateName
   prefs: { checkin3Day: true, benchAlerts: true, dailyBio: true, bioScope: 'home_first', pushEnabled: false },
   photos: {},                // playerId -> data URL, restored on load
   sessionToken: null,        // bearer token from POST /api/auth/session
-  user: null,                // { id, name } for the signed-in guest slot
+  user: null,                // the full users row for the signed-in guest slot
 }, load());
 
 function persist() { save(state); }
@@ -286,6 +287,32 @@ function wirePhotoSlots() {
 
 // ---------- Sign-in: shared-password gate over six fixed guest slots ------
 
+// The site password, remembered separately from PWD_KEY -- shb.v2 (the
+// state persisted under KEY) is wiped wholesale on sign-out, but the
+// password itself isn't tied to any one guest slot, so a device that
+// already knows it should still skip straight to picking a user next time
+// even after someone signs out.
+const PWD_KEY = 'shb.pwd';
+
+function loadSavedPassword() {
+  try { return localStorage.getItem(PWD_KEY); } catch { return null; }
+}
+
+function saveSavedPassword(password) {
+  try { localStorage.setItem(PWD_KEY, password); } catch { /* private mode */ }
+}
+
+function forgetSavedPassword() {
+  try { localStorage.removeItem(PWD_KEY); } catch { /* private mode */ }
+}
+
+// Hides the password field entirely once this device already knows it, so
+// returning just means picking a guest slot.
+function paintPasswordField() {
+  const field = document.getElementById('password-field');
+  if (field) field.hidden = !!loadSavedPassword();
+}
+
 // Static "Guest N" labels are what the build renders; this repaints them
 // with whatever PATCH /api/me has since set each slot's name to, so a
 // returning visitor sees real names rather than the placeholder ones.
@@ -308,11 +335,16 @@ async function loadGuestSlots() {
 
 async function signIn(guestId) {
   const passwordInput = document.getElementById('site-password');
-  const nameInput = document.getElementById('site-display-name');
   const errorEl = document.getElementById('sign-in-error');
-  const password = passwordInput ? passwordInput.value : '';
-  const name = nameInput ? nameInput.value.trim() : '';
+  const remembered = loadSavedPassword();
+  const password = remembered ?? (passwordInput ? passwordInput.value : '');
   if (errorEl) errorEl.hidden = true;
+
+  if (!password) {
+    if (errorEl) { errorEl.textContent = 'Enter the site password first.'; errorEl.hidden = false; }
+    passwordInput?.focus();
+    return;
+  }
 
   let res;
   try {
@@ -326,34 +358,62 @@ async function signIn(guestId) {
     return;
   }
   if (!res.ok) {
+    // A remembered password that no longer works (e.g. rotated) would
+    // otherwise fail silently on every future click -- forget it and fall
+    // back to asking for it again.
+    if (remembered) {
+      forgetSavedPassword();
+      paintPasswordField();
+    }
     const body = await res.json().catch(() => ({}));
     if (errorEl) { errorEl.textContent = body.error || 'Wrong password.'; errorEl.hidden = false; }
     return;
   }
 
+  saveSavedPassword(password);
   const { token, user } = await res.json();
   state.sessionToken = token;
-  state.user = { id: user.id, name: user.name };
+  state.user = user; // full row -- id, name, phone, contact_email, ...
   persist();
-
-  // Picking a name is part of signing in, not a separate step -- it only
-  // takes effect once the password above has already checked out.
-  if (name && name !== user.name) {
-    try {
-      const renameRes = await fetch(`${API_BASE}/api/me`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name }),
-      });
-      if (renameRes.ok) {
-        const { user: renamed } = await renameRes.json();
-        state.user.name = renamed.name;
-        persist();
-      }
-    } catch { /* sign-in still succeeded even if the rename didn't take */ }
-  }
-
   showStage('syndicate');
+}
+
+// ---------- Find your syndicate: join or create for real ----------
+
+// Shared by both a successful join and a successful create -- the group
+// this device is now "in", cosmetically, for the rest of this static build
+// (fixtures/ledger/etc. still render fixed mock data regardless of which
+// real group this is -- see new_syndicate_sheet()'s own copy).
+function settleIntoSyndicate(group) {
+  state.groupId = group.id;
+  state.syndicateName = group.name;
+  paintSyndicateName();
+  persist();
+  closeSheet();
+  showStage('app');
+  showTab('matchday');
+}
+
+async function joinSyndicate(code) {
+  const errorEl = document.getElementById('join-syndicate-error');
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/api/groups/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.sessionToken}` },
+      body: JSON.stringify({ invite_code: code }),
+    });
+  } catch {
+    if (errorEl) { errorEl.textContent = 'Could not reach the server -- check your connection.'; errorEl.hidden = false; }
+    return;
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    if (errorEl) { errorEl.textContent = body.error || 'Could not join with that code.'; errorEl.hidden = false; }
+    return;
+  }
+  const { group } = await res.json();
+  settleIntoSyndicate(group);
 }
 
 // ---------- Settings ----------
@@ -408,9 +468,31 @@ function hydratePrefs() {
   }
 }
 
+// Shared by the Settings "Group & profile" card's name/phone/email fields --
+// each saves itself independently on change, same PATCH /api/me endpoint
+// signIn() already uses for the sign-in-time rename.
+async function patchMe(fields) {
+  if (!state.sessionToken) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/me`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.sessionToken}` },
+      body: JSON.stringify(fields),
+    });
+    if (!res.ok) return;
+    const { user } = await res.json();
+    state.user = user;
+    persist();
+  } catch { /* offline -- the typed value stands locally until this saves */ }
+}
+
 function hydrateProfile() {
   const nameInput = document.getElementById('display-name');
   if (nameInput && state.user?.name) nameInput.value = state.user.name;
+  const phoneInput = document.getElementById('phone');
+  if (phoneInput && state.user?.phone) phoneInput.value = state.user.phone;
+  const emailInput = document.getElementById('email');
+  if (emailInput && state.user?.contact_email) emailInput.value = state.user.contact_email;
 }
 
 function paintPreview() {
@@ -464,6 +546,7 @@ function main() {
   paintDeviceBanner();
   paintPreview();
   paintSyndicateName();
+  paintPasswordField();
   loadGuestSlots();
   hydrateProfile();
 
@@ -471,20 +554,15 @@ function main() {
   document.getElementById('checkin-time')?.addEventListener('change', paintPreview);
   document.getElementById('bio-time')?.addEventListener('change', paintPreview);
 
-  document.getElementById('display-name')?.addEventListener('change', async (e) => {
+  document.getElementById('display-name')?.addEventListener('change', (e) => {
     const name = e.target.value.trim();
-    if (!name || !state.sessionToken) return;
-    try {
-      const res = await fetch(`${API_BASE}/api/me`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.sessionToken}` },
-        body: JSON.stringify({ name }),
-      });
-      if (!res.ok) return;
-      const { user } = await res.json();
-      state.user = { ...state.user, name: user.name };
-      persist();
-    } catch { /* offline -- the typed value stands locally until this saves */ }
+    if (name) patchMe({ name });
+  });
+  document.getElementById('phone')?.addEventListener('change', (e) => {
+    patchMe({ phone: e.target.value.trim() }); // '' clears it, same as the API allows
+  });
+  document.getElementById('email')?.addEventListener('change', (e) => {
+    patchMe({ contact_email: e.target.value.trim() });
   });
 
   document.body.addEventListener('click', (e) => {
@@ -507,12 +585,29 @@ function main() {
       case 'guest-login':
         signIn(el.dataset.guestId);
         return;
-      case 'join-syndicate':
-        showStage('app');
-        showTab('matchday');
+      case 'join-syndicate': {
+        const codeInput = document.getElementById('invite');
+        const code = codeInput ? codeInput.value.trim() : '';
+        const errorEl = document.getElementById('join-syndicate-error');
+        if (errorEl) errorEl.hidden = true;
+        if (!code) {
+          if (errorEl) { errorEl.textContent = 'Enter an invite code first.'; errorEl.hidden = false; }
+          codeInput?.focus();
+          return;
+        }
+        joinSyndicate(code);
         return;
+      }
       case 'sign-out':
-        localStorage.removeItem(KEY);
+        // Only the signed-in identity goes away -- the syndicate itself
+        // (its name), and everything else about this device's demo state,
+        // isn't this one person's to erase just by picking a different
+        // guest slot next. The remembered site password (PWD_KEY) is a
+        // separate key entirely and is untouched either way.
+        state.sessionToken = null;
+        state.user = null;
+        state.stage = 'landing';
+        persist();
         location.reload();
         return;
       case 'tab':
@@ -700,20 +795,42 @@ function main() {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
 
   // A real <form>, not a bare button, so pressing Enter in the name field
-  // submits it and the browser's own required-field validation applies --
-  // preventDefault stops the GET-navigation a plain form submit would
-  // otherwise try, since there's nothing server-side here to receive it.
-  document.getElementById('new-syndicate-form')?.addEventListener('submit', (e) => {
+  // submits it and the browser's own required-field validation applies.
+  // preventDefault stops the GET-navigation a plain form submit would try,
+  // since this now sends the same fields to the real POST /api/groups.
+  document.getElementById('new-syndicate-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const nameInput = document.getElementById('new-syn-name');
     const name = nameInput.value.trim();
     if (!name) { nameInput.focus(); return; }
-    state.syndicateName = name;
-    paintSyndicateName();
-    persist();
-    closeSheet();
-    showStage('app');
-    showTab('matchday');
+
+    const errorEl = document.getElementById('new-syndicate-error');
+    if (errorEl) errorEl.hidden = true;
+    const seasonYear = Number(document.getElementById('new-syn-season').value) || 2026;
+    const totalSeats = Number(document.getElementById('new-syn-seats').value) || 1;
+    const costInput = document.getElementById('new-syn-cost');
+    const packageCostCents = costInput.value ? Math.round(Number(costInput.value) * 100) : 0;
+
+    let res;
+    try {
+      res = await fetch(`${API_BASE}/api/groups`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.sessionToken}` },
+        body: JSON.stringify({
+          name, season_year: seasonYear, total_seats: totalSeats, package_cost_cents: packageCostCents,
+        }),
+      });
+    } catch {
+      if (errorEl) { errorEl.textContent = 'Could not reach the server -- check your connection.'; errorEl.hidden = false; }
+      return;
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      if (errorEl) { errorEl.textContent = body.error || 'Could not create the syndicate.'; errorEl.hidden = false; }
+      return;
+    }
+    const { group } = await res.json();
+    settleIntoSyndicate(group);
   });
 }
 
