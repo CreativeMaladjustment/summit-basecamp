@@ -1,6 +1,6 @@
 name: Deploy
 
-# Deploys to Cloudflare through the "shb" GitHub environment, which holds
+# Deploys to Cloudflare through the "sb" GitHub environment, which holds
 # CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID.
 #
 # Neither the API nor the site is on main yet, so the detect job below finds
@@ -27,7 +27,7 @@ permissions:
 
 concurrency:
   # One deploy at a time, and never cancel one that is already in flight.
-  group: deploy-shb
+  group: deploy-sb
   cancel-in-progress: false
 
 jobs:
@@ -129,13 +129,14 @@ jobs:
       needs.detect.outputs.worker-dir != ''
       && (github.event_name != 'workflow_dispatch' || inputs.target != 'web')
     runs-on: ubuntu-latest
-    environment: shb
+    environment: sb
     # The `secrets` context isn't available in a step's `if:` (only at
     # workflow/job level), so whether CF_SYNC_ADMIN_TOKEN is set gets
     # resolved into this job-level env var instead, which step `if:`s can
     # read.
     env:
       HAS_SYNC_ADMIN_TOKEN: ${{ secrets.CF_SYNC_ADMIN_TOKEN != '' }}
+      HAS_SITE_PWD: ${{ secrets.SITE_PWD != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -171,7 +172,7 @@ jobs:
       # Pushes the CF_SYNC_ADMIN_TOKEN GitHub secret to the Worker as its
       # SYNC_ADMIN_TOKEN secret, so nothing here ever needs `wrangler secret
       # put` run by hand -- set CF_SYNC_ADMIN_TOKEN once (any random string)
-      # in this "shb" environment and the next deploy carries it over.
+      # in this "sb" environment and the next deploy carries it over.
       # Skipped, not failed, until that secret exists, so a repo that
       # hasn't set it up yet still deploys; POST /api/admin/sync
       # (src/handlers.trigger_sync) refuses every call in the meantime.
@@ -188,6 +189,44 @@ jobs:
         env:
           SYNC_ADMIN_TOKEN: ${{ secrets.CF_SYNC_ADMIN_TOKEN }}
 
+      # Pushes the SITE_PWD GitHub secret to the Worker as its own SITE_PWD
+      # secret -- the one shared password every guest slot on the landing
+      # screen signs in with (src/auth.verify_site_password). Skipped, not
+      # failed, until that secret exists, so a repo that hasn't set it up
+      # yet still deploys; POST /api/auth/session refuses every call in the
+      # meantime (503).
+      - name: Set SITE_PWD secret
+        if: env.HAS_SITE_PWD == 'true'
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: ${{ needs.detect.outputs.worker-dir }}
+          wranglerVersion: '4.135.0'
+          secrets: |
+            SITE_PWD
+        env:
+          SITE_PWD: ${{ secrets.SITE_PWD }}
+
+      # The other half of the above: a Worker secret persists on Cloudflare
+      # once set, independent of GitHub, so removing the GitHub secret alone
+      # would otherwise leave the last-deployed password silently active --
+      # not the "unset means refused" behaviour the endpoint documents.
+      # `--force` skips the interactive confirmation wrangler secret delete
+      # asks for; continue-on-error covers the everything's-fine case where
+      # SITE_PWD was never set on the Worker to begin with (delete errors,
+      # nothing to clean up).
+      - name: Delete SITE_PWD secret if removed from GitHub
+        if: env.HAS_SITE_PWD == 'false'
+        continue-on-error: true
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: ${{ needs.detect.outputs.worker-dir }}
+          wranglerVersion: '4.135.0'
+          command: secret delete SITE_PWD --force
+
   web:
     name: Deploy site
     # Deliberately after the API: the site calls it, so the API should be the
@@ -201,7 +240,7 @@ jobs:
       && needs.api.result != 'cancelled'
       && (github.event_name != 'workflow_dispatch' || inputs.target != 'api')
     runs-on: ubuntu-latest
-    environment: shb
+    environment: sb
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

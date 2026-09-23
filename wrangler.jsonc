@@ -17,14 +17,16 @@
   "compatibility_date": "2024-12-05",
   "compatibility_flags": ["python_workers"],
 
-  // Non-secret config only. Secrets (SESSION_HMAC_SECRET, GOOGLE_CLIENT_ID,
-  // APPLE_CLIENT_ID) are set with `wrangler secret put <NAME>` and are
-  // never committed here. SYNC_ADMIN_TOKEN is the exception: it's pushed
-  // here by deploy.yml's "Set SYNC_ADMIN_TOKEN secret" step, from the
-  // CF_SYNC_ADMIN_TOKEN secret on the GitHub repo -- set that one GitHub
-  // secret and every deploy keeps this in sync, no local wrangler needed.
-  // It authenticates POST /api/admin/sync (see src/handlers.trigger_sync);
-  // .github/workflows/sync-roster.yml sends it as a bearer token.
+  // Non-secret config only. Secrets are set with `wrangler secret put <NAME>`
+  // and are never committed here -- except SYNC_ADMIN_TOKEN and SITE_PWD,
+  // both pushed by deploy.yml from a same-named GitHub secret on every
+  // deploy, no local wrangler needed. SYNC_ADMIN_TOKEN (from
+  // CF_SYNC_ADMIN_TOKEN) authenticates POST /api/admin/sync (see
+  // src/handlers.trigger_sync); sync-roster.yml sends it as a bearer token.
+  // SITE_PWD is the one shared password gating all six guest slots on the
+  // landing screen (see src/auth.verify_site_password and
+  // src/handlers.begin_session) -- set it once as the SITE_PWD secret in
+  // the "sb" GitHub environment.
   "vars": {
     "ENVIRONMENT": "production"
   },

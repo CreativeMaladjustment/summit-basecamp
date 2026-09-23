@@ -24,15 +24,23 @@ The repository (`creativemaladjustment/summit-basecamp`) has both halves scaffol
 | Member | `group_members.role = 'member'` | Belongs to one or more syndicates (`groups`); claims, releases, gifts or lists their own seats; records and settles expenses; sets their own notification preferences |
 | Guest | `seat_allocations.guest_name`, no `users` row | Receives a gifted seat; not a syndicate member, has no login or ledger entry |
 
+Not to be confused with the sign-in "guest slots" (`usr_guest1`..`usr_guest6`,
+`users.auth_provider = 'password'`) above — those are real, logged-in
+`users` rows behind the shared site password, distinct from this table's
+seat-gift `Guest`, which has no account at all.
+
 A single person can be a member of several syndicates (`group_members` is keyed by `group_id, user_id`), each with its own roster, fixtures and ledger — there is no cross-syndicate view beyond "Find your syndicate" and per-syndicate switching implied by `GET /api/groups`.
 
-Sign-in is Google or Apple OIDC (`users.auth_provider`); there is no email/password path and no anonymous browsing beyond the Landing and "Find your syndicate" screens.
+Sign-in is a shared-password gate, not per-person auth (see `docs/backend.md`
+"Sign-in"): six fixed guest slots (`users.auth_provider = 'password'`), one
+site-wide password, no email/password-per-person path and no anonymous
+browsing beyond the Landing and "Find your syndicate" screens.
 
 ## Core features by screen
 
 | Screen | Purpose | Backed by |
 | --- | --- | --- |
-| Landing | Summit Basecamp lockup, tonight's Summit Touchline notes as teasers, Continue with Google / Apple | `POST /api/auth/session` (OIDC exchange — **not implemented**, returns 501) |
+| Landing | Summit Basecamp lockup, tonight's Summit Touchline notes as teasers, six guest logins behind one shared password | `GET /api/auth/guests`, `POST /api/auth/session`, `PATCH /api/me` (all built and wired — the one screen the deployed frontend actually calls the API from) |
 | Find your syndicate | Join by invite code, or start a new one | `GET /api/groups`, `POST /api/groups`, `POST /api/groups/join` (creating and joining a syndicate are both built; the frontend still renders this screen from mock data — see Known gaps) |
 | Matchday | Next Match hero, Summit Touchline carousel, bench note threads, balance line | `GET /api/groups/{id}/fixtures`, `GET /api/groups/{id}/ledger`, `GET /api/bios/today` |
 | The 14er Pass | Every home fixture in the season, filtered by All / My Matches / On the Bench | `GET /api/groups/{id}/fixtures`, `GET /api/fixtures/{id}/seats` |
@@ -56,7 +64,7 @@ An expense (`POST /api/groups/{id}/expenses`) writes one `transactions` row per 
 
 ## Functional requirements
 
-1. **Authentication.** Sign in with Google or Apple; a session is a bearer token resolved server-side to a `users` row (`src/auth.py`). In development, `X-Dev-User` substitutes for the OIDC round trip. *Gap: the token exchange itself (`POST /api/auth/session`) is unbuilt — verifying the provider's ID token against its JWKS and writing a session into KV.*
+1. **Authentication.** Sign in to one of six shared guest slots with a single site-wide password (`POST /api/auth/session`); a session is a bearer token resolved server-side to a `users` row (`src/auth.py`). In development, `X-Dev-User` substitutes for a real session. Whoever is signed into a slot can set their own display name (`PATCH /api/me`), replacing that slot's "Guest N" placeholder for good.
 2. **Syndicate management.** A member creates a syndicate (name, season, total seats, package cost) and becomes its admin (`POST /api/groups`), which also mints the syndicate's invite code. Each syndicate has its own roster, fixtures and ledger. Another member joins an existing syndicate with that code (`POST /api/groups/join`); an admin can rotate it (`POST /api/groups/{id}/invite-code/rotate`) or resize the syndicate's `total_seats` (`PATCH /api/groups/{id}`), which retrofits existing fixtures with the new seats and refuses to shrink past anything still occupied. *Gap: no route to remove a member outright.*
 3. **Fixture & seat management.** An admin adds fixtures (opponent, kickoff time, venue, tier). Seats are created with the fixture and default to `confirmed`, assigned to each member's `default_seat_number`.
 4. **Seat handoff.** A seat holder can release, gift, or externally list a seat they can't use (see Seat handoff above); every seat has exactly one current status (`confirmed`, `on_bench`, `gifted`, `resale_listed`).
@@ -70,7 +78,7 @@ An expense (`POST /api/groups/{id}/expenses`) writes one `transactions` row per 
 
 - No push notification delivery (only the underlying "who needs a nudge" logic).
 - No integration with any external ticketing platform (SeatGeek, Ticketmaster, the club's own app) — "List Outside the 14ers" only tracks that a seat is listed; the admin or seat holder handles the actual transfer or sale themselves, outside SquadSeats.
-- Frontend and backend are not yet integrated — the PWA ships with mock data compiled in at build time (`web/build_src/data.py`), even though every screen but Landing and OIDC now has a live endpoint behind it (fixtures, ledger, listings, bios, roster, opponents). Wiring it to the live API (build-time fetch for public data, runtime session-authenticated fetch for per-member data like balances and seat assignments) is the next major milestone.
+- Frontend and backend are integrated on exactly one screen so far (Landing, sign-in). Every other screen ships with mock data compiled in at build time (`web/build_src/data.py`), even though each has a live endpoint behind it (fixtures, ledger, listings, bios, roster, opponents). Wiring those up to the live API (build-time fetch for public data, runtime session-authenticated fetch for per-member data like balances and seat assignments) is the next major milestone.
 
 ## Non-functional requirements
 
@@ -97,14 +105,13 @@ Tap targets ≥ 44px; toggles are `role="switch"` with `aria-checked`; the Summi
 
 ### Deployment
 
-- Deploys run through `.github/workflows/deploy.yml` on push to `main`, using the GitHub environment **"shb"** (holds `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`). The Worker deploys to Cloudflare Workers, the PWA to Cloudflare Pages, each independently detected and skipped if absent.
+- Deploys run through `.github/workflows/deploy.yml` on push to `main`, using the GitHub environment **"sb"** (holds `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`). The Worker deploys to Cloudflare Workers, the PWA to Cloudflare Pages, each independently detected and skipped if absent.
 - All code changes land via pull request; nothing is pushed directly to `main`, and PRs require passing SAST/Terraform/DAST checks.
 - Resource provisioning (D1, KV) is a separate manual workflow, `provision-cloudflare.yml`.
 
 ## Open questions & near-term scope
 
-- **Frontend/backend wiring (feature next)** — no target date set; this is the largest remaining piece and touches every screen above.
-- **OIDC sign-in** — which providers' JWKS endpoints, and token lifetime/refresh strategy, are undecided.
+- **Frontend/backend wiring (feature next)** — no target date set; this is the largest remaining piece and touches every screen above except Landing (sign-in is wired).
 - **Push delivery** — the cron logic exists; the send mechanism (web push? provider?) is not chosen.
 - **Weighted expense splits** — the formula for tier-weighted shares and bench-release credit is "still being decided" per `docs/backend.md`; `split_equally` is the only implementation today.
 - **Roster/scouting data** — `GET /api/roster` and `GET /api/opponents` now back Home Team and Visitors with real tables (`roster_players`, `opponents`, `opponent_players`). The Denver Summit squad (`roster_players`) is the real 2026 roster as of 2026-09-21, kept current by the sync job below. `opponents` covers all 15 other NWSL clubs with real facts (real dates, real venue, the real result of the most recent meeting) as of 2026-09-22 -- see `seed/opponents_seed.sql`; no invented form/shape/"danger player" commentary, since none of that is published anywhere to verify. `opponent_players` has no rows seeded by hand (unlike the home roster, no local snapshot was transcribed for any opponent) -- it is populated entirely by `src/sync.py`'s `_sync_opponent_rosters`, using roster-page URLs the user verified directly for all 15 clubs, so real opponent rosters land the first time that job runs successfully against the deployed Worker rather than needing a follow-up transcription pass.

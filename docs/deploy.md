@@ -4,9 +4,9 @@
 and on demand via the workflow's "Run workflow" button, where you can pick
 whether to deploy the API, the site, or both.
 
-It runs under the **`shb`** GitHub environment, which holds
+It runs under the **`sb`** GitHub environment, which holds
 `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. Both deploying jobs declare
-`environment: shb`, so those secrets are only readable from the jobs that
+`environment: sb`, so those secrets are only readable from the jobs that
 actually deploy.
 
 Nothing here touches DNS. The API token has no zone permission on purpose, and
@@ -27,7 +27,7 @@ The site deploys after the API, and only if the API deploy did not fail. The
 site calls the API, so if a deploy only half succeeds the API should be the
 newer of the two.
 
-Deploys are serialised (`concurrency: deploy-shb`) and a deploy already in
+Deploys are serialised (`concurrency: deploy-sb`) and a deploy already in
 flight is never cancelled.
 
 ## Things it works out for itself

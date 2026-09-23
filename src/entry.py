@@ -17,6 +17,7 @@ from router import Router
 router = Router()
 
 router.add("GET", "/api/health", handlers.health)
+router.add("GET", "/api/auth/guests", handlers.list_guest_slots)
 router.add("POST", "/api/auth/session", handlers.begin_session)
 router.add("GET", "/api/me", handlers.get_me)
 router.add("PATCH", "/api/me", handlers.update_me)

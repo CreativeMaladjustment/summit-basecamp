@@ -28,6 +28,7 @@ profile picture is nowhere near KV's 25 MiB per-value limit.
 | `migrations/0007_fixture_source_ref_unique.sql` | Partial unique index on `fixtures(group_id, source_ref)`, guarding `_create_fixture_from_sync` against two overlapping sync runs both creating the same fixture |
 | `migrations/0008_group_invite_codes.sql` | `groups.invite_code`, unique, backing `POST /api/groups/join` |
 | `migrations/0009_user_contact_info.sql` | `users.phone`, `users.contact_email`, backing `PATCH /api/me` |
+| `migrations/0010_guest_password_auth.sql` | Seeds the six shared-password guest slots (`usr_guest1`..`usr_guest6`) sign-in uses |
 | `seed/dev_seed.sql` | Four members, two fixtures, a part-paid ledger, the squad and all 15 opponent dossiers -- dev only, not safe to run against production (see below); DELETE-then-INSERT throughout, so rerunning it against the same database is a full reset |
 | `seed/roster_seed.sql` | Just the real home roster, safe to run against production (`wrangler d1 execute ... --remote --file=seed/roster_seed.sql`) as a one-off; the sync job is the ongoing way this table gets updated |
 | `seed/opponents_seed.sql` | All 15 real opponent dossiers, safe to run against production -- **not** just an optional bootstrap like the other two seeds; the sync job never creates an opponent row from nothing, only updates ones this file (or an equivalent) already put there. Idempotent (`INSERT ... ON CONFLICT DO UPDATE`, never a DELETE), so rerunning it -- to add a club or fix a typo -- never wipes sync-owned `opponent_players` rows or an admin's hand-edited `form`/`shape_note` |
@@ -53,7 +54,7 @@ npm run dev                # wrangler dev on http://localhost:8787
 npm test                   # the Python unit and API tests
 ```
 
-With `ENVIRONMENT=development` the OIDC round trip is skipped: name the caller
+With `ENVIRONMENT=development` real sign-in is skipped: name the caller
 in an `X-Dev-User` header instead of a bearer token.
 
 ```sh
@@ -65,7 +66,8 @@ curl -H 'X-Dev-User: usr_ada' http://localhost:8787/api/groups
 | Method | Path | What it does |
 | --- | --- | --- |
 | GET | `/api/health` | Liveness, including a D1 round trip |
-| POST | `/api/auth/session` | Exchange an OIDC token for a session (not implemented) |
+| GET | `/api/auth/guests` | The six shared-password guest slots, id and current name (unauthenticated) |
+| POST | `/api/auth/session` | Sign in to a guest slot with the shared site password |
 | GET | `/api/me` | The signed-in member and their notification preferences |
 | PATCH | `/api/me` | Edit your own display name, phone or fallback contact email |
 | GET | `/api/groups` | Syndicates the caller belongs to |
@@ -157,21 +159,57 @@ runner has a real, currently-open bug misparsing multi-statement
 though the same SQL runs fine locally -- worth revisiting once that's fixed
 upstream, not worth risking a broken production migration for now.
 
+## Sign-in
+
+There is no per-person auth. Sign-in is a shared-password gate over six fixed
+guest slots (`usr_guest1`..`usr_guest6`, seeded by migration `0010`): everyone
+types the same `SITE_PWD` Worker secret and picks which slot they are.
+`POST /api/auth/session` (`src/handlers.begin_session`) checks the password
+with `hmac.compare_digest` (same constant-time pattern as `trigger_sync`'s
+`SYNC_ADMIN_TOKEN` check) via `src/auth.verify_site_password`, then mints a
+session token (`src/auth.start_session`, 64 bytes from `secrets`) and writes
+`session:<token>` into the `SESSIONS` KV namespace with a 30-day TTL -- the
+write side of `_user_id_from_request`'s read. `GET /api/auth/guests` lists
+all six slots' current names, unauthenticated, so the landing screen can show
+real names to a visitor who has not signed in yet.
+
+Each slot starts named "Guest N". `PATCH /api/me` (`src/handlers.update_me`)
+lets whoever is signed into a slot replace that with their own name, which
+then sticks for that slot going forward -- the frontend does this as part of
+signing in (a "Your name" field on the same landing-screen form as the
+password), but nothing about the endpoint ties it to that specific moment.
+
+Set `SITE_PWD` once as a secret in the `sb` GitHub environment; like
+`CF_SYNC_ADMIN_TOKEN`, deploy.yml's "Set SITE_PWD secret" step pushes it to
+the Worker on every deploy, no local `wrangler secret put` needed. Never set,
+`POST /api/auth/session` refuses every call with 503 rather than falling
+open. Removing the GitHub secret later doesn't just stop future pushes --
+a Worker secret persists on Cloudflare independently of GitHub, so deploy.yml's
+"Delete SITE_PWD secret if removed from GitHub" step actively deletes it from
+the Worker in that case, so revoking access really revokes it rather than
+leaving the last-deployed password silently active.
+
+There is deliberately no rate-limiting or lockout on wrong-password attempts
+beyond the constant-time comparison -- the same call this codebase already
+made for invite codes (see "Invite codes" above): the password is a single
+shared secret whose entropy is the deploying admin's to choose, not a
+per-account credential guarding something that needs its own throttling.
+
 ## Profile
 
 `PATCH /api/me` edits the caller's own `name`, `phone`, or `contact_email`
-(migration `0009`) -- the Settings screen's "Group & profile" card. `name`
-can be changed but never cleared to empty, since it's what every other
-member sees in a member list; `phone`/`contact_email` can be cleared by
-sending `null` or an empty string. Both take any subset of the three
-fields in one call (only what's present in the body changes) and reject a
-body with none of them.
+(migration `0009`) -- the Settings screen's "Group & profile" card, and also
+how a guest slot replaces its "Guest N" placeholder (see "Sign-in" above).
+`name` can be changed but never cleared to empty, since it's what every
+other member sees in a member list; `phone`/`contact_email` can be cleared
+by sending `null` or an empty string. All three fields are optional in one
+call (only what's present in the body changes), and a body with none of
+them is rejected.
 
 `phone` and `contact_email` are their own columns, not the same as `email`
-(migration `0001`, unique, written by the Google/Apple sign-in exchange
-once that's implemented) -- a member's fallback contact for a critical
-ticket transfer isn't necessarily the same number or address their sign-in
-account uses.
+(migration `0001`, unique -- the guest slot's own login identity, not a
+contact address) -- a member's fallback contact for a critical ticket
+transfer isn't necessarily the same number or address they sign in with.
 
 ## Profile pictures
 
@@ -231,7 +269,7 @@ right after the code or data that feeds it changes rather than waiting up
 to a week for the next cron tick. The admin endpoint is authenticated by a
 shared-secret bearer token (`SYNC_ADMIN_TOKEN` on the Worker), not a
 signed-in user. Set it once as the `CF_SYNC_ADMIN_TOKEN` secret in the
-`shb` GitHub environment -- deploy.yml's "Set SYNC_ADMIN_TOKEN secret" step
+`sb` GitHub environment -- deploy.yml's "Set SYNC_ADMIN_TOKEN secret" step
 pushes that value to the Worker on every deploy, so there is no
 `wrangler secret put` to run by hand.
 
@@ -339,24 +377,25 @@ wrongly-skipped one just never appears at all.
 
 ## What is deliberately left out
 
-- **Sign-in.** `POST /api/auth/session` returns 501. Verifying the Google or
-  Apple ID token against the provider's JWKS and writing `session:<token>` into
-  the SESSIONS KV namespace is the only missing piece; `src/auth.py` already
-  reads the other end of it.
 - **Push delivery.** The 10:00 cron finds who needs a nudge and logs it; it
   does not send anything yet.
 - **Weighted payouts.** `split_equally` splits an expense evenly. Weighting by
   fixture tier and crediting members who bench a seat are still being decided;
   when they land, that one function changes.
-- **The frontend never calls this API.** `web/index.html` is a static build
-  (`web/build_src/build.py`) from mock data in `web/build_src/data.py`;
-  `web/src/app.js` only toggles pre-rendered DOM, it never fetches anything.
-  Every endpoint above -- including the admin seat/member/group editing and
-  avatar upload added alongside this note -- is real and tested
-  (`tests/test_api.py`) but not reachable from the deployed site yet, and
-  wiring the frontend up is blocked on sign-in above: without a real session,
-  there is no way for a fetch call to know who "the caller" is. This is a
-  standing gap, not something this change set attempts to close.
+- **The frontend calls this API in exactly one place.** `web/index.html` is
+  still a static build (`web/build_src/build.py`) from mock data in
+  `web/build_src/data.py`, and `web/src/app.js` still mostly just toggles
+  pre-rendered DOM. Sign-in (see "Sign-in" above) is the one real exception --
+  `POST /api/auth/session`, `GET /api/auth/guests` and `PATCH /api/me` are
+  now reachable from the deployed site, using `API_BASE` (`app.js`, hardcoded
+  to the Worker's own hostname -- update it by hand the same way
+  `CF_API_BASE_URL` already needs updating on a Worker rename, see
+  `docs/deploy.md`). Every other endpoint above -- the syndicate/fixture/seat
+  data, the ledger, avatar upload -- is real and tested (`tests/test_api.py`)
+  but still not reachable from the deployed site; a signed-in session now
+  exists to authenticate those calls with, but wiring each screen up to real
+  data is still its own piece of work, not something this change set
+  attempts to close.
 
 ## Testing
 

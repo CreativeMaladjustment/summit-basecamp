@@ -9,7 +9,13 @@ import binascii
 import hmac
 import json
 
-from auth import current_user, require_admin, require_membership
+from auth import (
+    current_user,
+    require_admin,
+    require_membership,
+    start_session,
+    verify_site_password,
+)
 from db import batch, execute, new_id, new_invite_code, query, query_one
 from responses import ApiError, binary_response, json_response, read_json, require, require_int
 from splits import net_balances, settle_plan, split_equally
@@ -40,17 +46,36 @@ async def health(request, env, params):
     return json_response({"status": "ok", "environment": env.ENVIRONMENT})
 
 
-async def begin_session(request, env, params):
-    """Exchange a Google/Apple ID token for a session token.
-
-    Not implemented in this scaffold. Verifying the provider's JWT against its
-    JWKS and writing `session:<token>` into the SESSIONS KV namespace is the
-    only piece missing; auth.py already reads the other end of it.
-    """
-    return json_response(
-        {"error": "Sign-in is not wired up yet in this scaffold"},
-        status=501,
+async def list_guest_slots(request, env, params):
+    """The six shared-password login slots on the landing screen, in id
+    order. Public and unauthenticated -- nobody is signed in yet at this
+    point in the flow. Each slot's name starts as "Guest N" (migration 0010)
+    and is whatever PATCH /api/me most recently set it to once someone
+    claims that slot as their own."""
+    guests = await query(
+        env, "SELECT id, name FROM users WHERE auth_provider = 'password' ORDER BY id"
     )
+    return json_response({"guests": guests})
+
+
+async def begin_session(request, env, params):
+    """Sign in to one of the six shared guest slots with the site password.
+
+    This is an access gate, not per-person auth: every slot accepts the same
+    SITE_PWD Worker secret, and the caller just picks which slot they are.
+    """
+    body = await read_json(request)
+    (user_id, password) = require(body, "user_id", "password")
+    verify_site_password(env, password)
+
+    user = await query_one(
+        env, "SELECT * FROM users WHERE id = ? AND auth_provider = 'password'", user_id
+    )
+    if user is None:
+        raise ApiError(400, "Not a valid login")
+
+    token = await start_session(env, user["id"])
+    return json_response({"token": token, "user": user})
 
 
 async def get_me(request, env, params):
@@ -63,14 +88,16 @@ async def get_me(request, env, params):
 
 async def update_me(request, env, params):
     """Edit the caller's own display name, phone or fallback contact email
-    -- the Settings screen's "Group & profile" card.
+    -- the Settings screen's "Group & profile" card. Also how a guest slot
+    replaces its "Guest N" placeholder (see migration 0010) with the name
+    someone actually goes by, the first time they set one.
 
     `phone`/`contact_email` are deliberately separate columns from the
     sign-in `email` (see migration 0009): a member may want a different
     number or address reachable for critical ticket transfers than the one
-    their Google or Apple account uses. `name` doubles as what every other
-    member sees in a member list, so unlike phone/contact_email it can be
-    edited but never cleared to empty.
+    their account uses. `name` doubles as what every other member sees in
+    a member list, so unlike phone/contact_email it can be edited but never
+    cleared to empty.
     """
     user = await current_user(request, env)
     body = await read_json(request)

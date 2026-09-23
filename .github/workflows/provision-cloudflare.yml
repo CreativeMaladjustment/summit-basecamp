@@ -36,7 +36,7 @@ jobs:
   provision:
     name: Create resources and open a PR
     runs-on: ubuntu-latest
-    environment: shb
+    environment: sb
     permissions:
       contents: write
       pull-requests: write
@@ -209,7 +209,7 @@ jobs:
           else
             gh pr create \
               --title "Wire real Cloudflare resource ids into wrangler.jsonc" \
-              --body "Created by the Provision Cloudflare resources workflow (run ${{ github.run_id }}). Replaces the placeholder KV namespace and/or D1 database id in wrangler.jsonc with the id(s) of the resource(s) just created in the Cloudflare account behind the shb environment." \
+              --body "Created by the Provision Cloudflare resources workflow (run ${{ github.run_id }}). Replaces the placeholder KV namespace and/or D1 database id in wrangler.jsonc with the id(s) of the resource(s) just created in the Cloudflare account behind the sb environment." \
               --base main \
               --head "$branch"
           fi

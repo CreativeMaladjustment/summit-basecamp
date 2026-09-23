@@ -48,7 +48,7 @@ expand target that's referenced actually exists, and so on.
 
 | Screen | What it does |
 | --- | --- |
-| Landing | Summit Basecamp lockup, tonight's Summit Touchline notes as teasers, Continue with Google / Apple |
+| Landing | Summit Basecamp lockup, tonight's Summit Touchline notes as teasers, six guest logins behind one shared password |
 | Find your syndicate | Join by invite code, or start a new one |
 | Matchday | Next Match hero, Summit Touchline carousel, bench note threads, balance line |
 | The 14er Pass | Every home fixture in the season, filtered by All / My Matches / On the Bench |
@@ -103,8 +103,10 @@ library's `html` module — the same reasoning as the backend's own
 Everything the app shows comes from `build_src/data.py`, baked into
 `index.html` at build time. `src/app.js` holds only the runtime state that
 can change after a click — the current tab, which seats are claimed, sheet
-contents typed in, dropped photos — persisted to `localStorage`. Sign-in sets
-a flag rather than running the real Google/Apple OIDC round trip. Player
+contents typed in, dropped photos — persisted to `localStorage`. Sign-in is
+the one real API integration: it calls the deployed Worker
+(`POST /api/auth/session`, `GET /api/auth/guests`, `PATCH /api/me` — see
+`docs/backend.md` "Sign-in") rather than just setting a local flag. Player
 names, jersey numbers, stats and fixture dates are invented placeholders —
 swap in the real roster and the published fixture list when they exist, and
 point the club bio links at real URLs.
