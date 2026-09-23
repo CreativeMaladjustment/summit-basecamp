@@ -446,13 +446,14 @@ function paintMySyndicates(groups) {
 }
 
 // Shared by both a successful join and a successful create -- the group
-// this device is now "in", cosmetically, for the rest of this static build
-// (fixtures/ledger/etc. still render fixed mock data regardless of which
-// real group this is -- see new_syndicate_sheet()'s own copy). mySeatLabel
-// is only ever known at creation time (join has no seat-picking step yet),
-// so it defaults to null here -- explicitly resetting it on every call
-// rather than leaving a previous syndicate's seat label stuck around after
-// joining a different one with none of its own.
+// this device is now "in". The 14ers ledger and this header's "N seats ·
+// Sec/Row" readout are real, painted from the API by paintRealSyndicateDetail
+// below; Matchday/Pitch/Bench still render fixed mock fixtures regardless of
+// which real group this is -- see new_syndicate_sheet()'s own copy.
+// mySeatLabel is only ever known at creation time (join has no seat-picking
+// step yet), so it defaults to null here -- explicitly resetting it on every
+// call rather than leaving a previous syndicate's seat label stuck around
+// after joining a different one with none of its own.
 function settleIntoSyndicate(group, mySeatLabel = null) {
   state.groupId = group.id;
   state.syndicateName = group.name;
@@ -465,6 +466,180 @@ function settleIntoSyndicate(group, mySeatLabel = null) {
   closeSheet();
   showStage('app');
   showTab('matchday');
+  paintRealSyndicateDetail();
+}
+
+// Overwrites the 14ers ledger card and the header's "N seats · Sec/Row"
+// readout -- both pre-rendered with invented demo numbers (web/build_src/
+// data.py) -- with this syndicate's real GET /api/groups/{id} and
+// .../ledger data: real price, real seat/member counts, and real per-member
+// balances (net_balances/settle_plan; an evenly-split expense ledger, no
+// tier weighting) instead of the mock weighted-by-tier breakdown. A no-op
+// until there is a real syndicate and session to ask about, and silently
+// leaves the demo numbers in place if either call fails -- there is nothing
+// actionable to show the caller here beyond what's already on screen.
+async function paintRealSyndicateDetail() {
+  if (!state.groupId || !state.sessionToken) return;
+  const authHeaders = { Authorization: `Bearer ${state.sessionToken}` };
+
+  let group, members;
+  try {
+    const groupRes = await fetch(`${API_BASE}/api/groups/${state.groupId}`, { headers: authHeaders });
+    if (!groupRes.ok) return;
+    ({ group, members } = await groupRes.json());
+  } catch {
+    return;
+  }
+
+  let balances = {};
+  let settlePlan = [];
+  try {
+    const ledgerRes = await fetch(`${API_BASE}/api/groups/${state.groupId}/ledger`, { headers: authHeaders });
+    if (ledgerRes.ok) ({ balances, settle_plan: settlePlan } = await ledgerRes.json());
+  } catch {
+    // Leave balances/settlePlan empty -- everyone reads as square rather
+    // than blocking the rest of this real data (group/members) from showing.
+  }
+
+  const holdsEl = document.getElementById('syndicate-holds');
+  if (holdsEl) {
+    const seatBits = [];
+    if (group.section) seatBits.push(`Sec ${group.section}`);
+    if (group.seat_row) seatBits.push(`Row ${group.seat_row}`);
+    const seatWord = group.total_seats === 1 ? 'seat' : 'seats';
+    holdsEl.textContent = `— ${group.total_seats} ${seatWord}` + (seatBits.length ? ` · ${seatBits.join(', ')}` : '');
+  }
+
+  // Real season chip/block -- there is exactly one, since a syndicate is a
+  // single season's package with no year-over-year link to any other one.
+  const year = String(group.season_year);
+  state.season = year;
+  const seasonChip = document.querySelector('[data-role="season"]');
+  if (seasonChip) {
+    seasonChip.textContent = `${year} Season`;
+    seasonChip.dataset.value = year;
+  }
+  const seasonBlock = document.querySelector('[data-season-block]');
+  if (seasonBlock) seasonBlock.dataset.seasonBlock = year;
+  showSeason(year);
+
+  const yearLabelEl = document.getElementById('ledger-package-year');
+  if (yearLabelEl) yearLabelEl.textContent = `${year} package`;
+  const priceEl = document.getElementById('ledger-package-price');
+  if (priceEl) priceEl.textContent = moneyCents(group.package_cost_cents);
+  const circleEl = document.getElementById('ledger-package-circle');
+  if (circleEl) {
+    const seatWord = group.total_seats === 1 ? 'seat' : 'seats';
+    circleEl.textContent = `${group.total_seats} ${seatWord} · ${members.length} in the circle`;
+  }
+  // No real fixture is tied to a tier/cost yet (Matchday/Pitch are still the
+  // demo schedule) -- nothing to weight, so this replaces the mock bars
+  // rather than showing them against invented fixtures.
+  const tiersEl = document.getElementById('ledger-package-tiers');
+  if (tiersEl) {
+    tiersEl.innerHTML = '';
+    const note = document.createElement('p');
+    note.style.cssText = 'margin:0;font-size:13px;color:var(--ink-mute)';
+    note.textContent = 'No fixtures logged yet.';
+    tiersEl.appendChild(note);
+  }
+
+  const debtsRowsEl = document.getElementById('ledger-debts-rows');
+  const squaredListEl = document.getElementById('ledger-squared-list');
+  if (debtsRowsEl && squaredListEl) {
+    debtsRowsEl.innerHTML = '';
+    squaredListEl.innerHTML = '';
+    const membersById = Object.fromEntries(members.map((m) => [m.id, m]));
+    if (settlePlan.length) {
+      for (const transfer of settlePlan) {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--hairline)';
+        const av = document.createElement('div');
+        av.className = 'avatar';
+        av.style.background = '#134E48';
+        av.textContent = initials(membersById[transfer.from]?.name);
+        const p = document.createElement('p');
+        p.style.cssText = 'margin:0;flex:1;font-size:14px';
+        const fromStrong = document.createElement('strong');
+        fromStrong.textContent = membersById[transfer.from]?.name ?? 'Someone';
+        const toStrong = document.createElement('strong');
+        toStrong.textContent = membersById[transfer.to]?.name ?? 'someone';
+        p.append(fromStrong, ' owes ', toStrong);
+        const amount = document.createElement('span');
+        amount.style.cssText = 'font-family:var(--font-mono);font-weight:500';
+        amount.textContent = moneyCents(transfer.amount_cents);
+        row.append(av, p, amount);
+        debtsRowsEl.appendChild(row);
+      }
+    } else {
+      const p = document.createElement('p');
+      p.style.cssText = 'margin:0;font-size:14px;color:var(--ink-mute)';
+      p.textContent = 'All square.';
+      debtsRowsEl.appendChild(p);
+    }
+    const inSettlePlan = new Set(settlePlan.flatMap((t) => [t.from, t.to]));
+    for (const member of members) {
+      if (inSettlePlan.has(member.id)) continue;
+      const p = document.createElement('p');
+      p.style.cssText = 'margin:0 0 6px;font-size:14px;color:var(--ink-mute)';
+      p.textContent = `${member.name} is all square.`;
+      squaredListEl.appendChild(p);
+    }
+  }
+
+  const balanceLineEl = document.getElementById('ledger-balance-line');
+  if (balanceLineEl) {
+    const myCents = balances[state.user?.id] || 0;
+    const textEl = balanceLineEl.querySelector('[data-role="balance-text"]');
+    if (textEl) {
+      textEl.textContent = myCents === 0 ? 'All square with the 14ers.'
+        : myCents > 0 ? `The circle holds your ${moneyCents(myCents)}.`
+        : `You hold the tab (${moneyCents(Math.abs(myCents))}).`;
+    }
+    const settleBtn = balanceLineEl.querySelector('[data-open-sheet="sheet-settleup"]');
+    if (settleBtn) {
+      settleBtn.hidden = myCents === 0;
+      settleBtn.dataset.settleAmount = String(Math.abs(myCents));
+      settleBtn.dataset.settleOwed = myCents > 0 ? 'true' : 'false';
+    }
+  }
+
+  const historyEl = document.getElementById('ledger-history-rows');
+  if (historyEl) {
+    historyEl.innerHTML = '';
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'setting-row';
+    row.dataset.role = 'season';
+    row.dataset.value = year;
+    row.style.cssText = 'width:100%;text-align:left;align-items:center;background:none;border:none;'
+      + 'border-bottom:1px solid var(--hairline);cursor:pointer;font:inherit;color:inherit';
+    const body = document.createElement('div');
+    body.className = 'setting-row__body';
+    const label = document.createElement('p');
+    label.className = 'setting-row__label';
+    label.textContent = `${year} Season`;
+    const help = document.createElement('p');
+    help.className = 'setting-row__help';
+    help.textContent = settlePlan.length ? `${settlePlan.length} open transfer${settlePlan.length > 1 ? 's' : ''}` : 'Settled';
+    body.append(label, help);
+    const amount = document.createElement('span');
+    amount.style.cssText = 'font-family:var(--font-mono);font-size:14px';
+    amount.textContent = moneyCents(group.package_cost_cents);
+    row.append(body, amount);
+    historyEl.appendChild(row);
+  }
+}
+
+// "Jason Miller" -> "JM"; a lone name -> its first two letters. Same shape
+// as the mock MEMBERS dict's hand-picked initials, computed instead of
+// invented since a real member's name is whatever they set it to.
+function initials(name) {
+  if (!name) return '?';
+  const parts = name.trim().split(/\s+/);
+  return parts.length > 1
+    ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+    : name.slice(0, 2).toUpperCase();
 }
 
 async function joinSyndicate(code) {
@@ -648,6 +823,7 @@ function main() {
   paintPasswordField();
   loadGuestSlots();
   hydrateProfile();
+  paintRealSyndicateDetail();
 
   document.querySelectorAll('.switch[data-pref]').forEach(wireToggle);
   document.getElementById('checkin-time')?.addEventListener('change', paintPreview);

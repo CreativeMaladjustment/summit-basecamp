@@ -73,7 +73,7 @@ def header(open_seats_count):
         h("strong", {"data-role": "syndicate-name", "style": {
             "fontWeight": "700", "overflow": "hidden", "textOverflow": "ellipsis",
             "whiteSpace": "nowrap"}}, syn["name"]),
-        h("span", {"style": {"fontSize": "13px", "color": "var(--ink-mute)", "whiteSpace": "nowrap"}},
+        h("span", {"id": "syndicate-holds", "style": {"fontSize": "13px", "color": "var(--ink-mute)", "whiteSpace": "nowrap"}},
           f'— {syn["holds"]}'),
     )
 

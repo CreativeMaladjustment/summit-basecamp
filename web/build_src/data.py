@@ -38,10 +38,14 @@ SYNDICATES = [
     },
 ]
 
-# Tickets are tracked by year, from the first season to the next.
+# Tickets are tracked by year. Only the current season is real -- a
+# `groups` row is a single season's package, with no year-over-year link to
+# any other one, so there is no real "season history" to show yet (see
+# web/src/app.js's paintRealSyndicateDetail). The second, prior-season entry
+# this used to carry was demo flavor only and never corresponded to
+# anything a real syndicate could have.
 SEASONS = [
     {"year": 2026, "label": "2026 Season", "package_cents": 248000, "current": True},
-    {"year": 2025, "label": "2025 Season", "package_cents": 231000, "current": False},
 ]
 
 # Weighted price distribution: a rivalry weekend match carries more of the
@@ -97,12 +101,6 @@ LEDGER = {
         "package_cents": 248000,
         "paid": {k: 49600 for k in MEMBERS},
         "owed": {k: 49600 for k in MEMBERS},
-        "debts": [],
-    },
-    2025: {
-        "package_cents": 231000,
-        "paid": {k: 46200 for k in MEMBERS},
-        "owed": {k: 46200 for k in MEMBERS},
         "debts": [],
     },
 }
