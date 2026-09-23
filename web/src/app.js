@@ -8,6 +8,12 @@
 
 const KEY = 'shb.v2';
 
+// The deployed Worker's own hostname -- see wrangler.jsonc's "name" comment
+// for why a rename to it deploys a *new* Worker at a *new* hostname rather
+// than relabeling this one. Update this by hand if that ever happens, the
+// same manual step docs/deploy.md already asks for on CF_API_BASE_URL.
+const API_BASE = 'https://summit-basecamp-api.shb-fe7.workers.dev';
+
 function load() {
   try {
     const raw = localStorage.getItem(KEY);
@@ -30,6 +36,8 @@ const state = Object.assign({
   syndicateName: null,      // set once "Start a new syndicate" is submitted
   prefs: { checkin3Day: true, benchAlerts: true, dailyBio: true, bioScope: 'home_first', pushEnabled: false },
   photos: {},                // playerId -> data URL, restored on load
+  sessionToken: null,        // bearer token from POST /api/auth/session
+  user: null,                // { id, name } for the signed-in guest slot
 }, load());
 
 function persist() { save(state); }
@@ -276,6 +284,78 @@ function wirePhotoSlots() {
   }
 }
 
+// ---------- Sign-in: shared-password gate over six fixed guest slots ------
+
+// Static "Guest N" labels are what the build renders; this repaints them
+// with whatever PATCH /api/me has since set each slot's name to, so a
+// returning visitor sees real names rather than the placeholder ones.
+async function loadGuestSlots() {
+  const container = document.getElementById('guest-slots');
+  if (!container) return;
+  let guests;
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/guests`);
+    if (!res.ok) return;
+    ({ guests } = await res.json());
+  } catch {
+    return; // offline -- the static "Guest N" labels stand in
+  }
+  for (const guest of guests) {
+    const btn = container.querySelector(`[data-guest-id="${CSS.escape(guest.id)}"]`);
+    if (btn) btn.textContent = guest.name;
+  }
+}
+
+async function signIn(guestId) {
+  const passwordInput = document.getElementById('site-password');
+  const nameInput = document.getElementById('site-display-name');
+  const errorEl = document.getElementById('sign-in-error');
+  const password = passwordInput ? passwordInput.value : '';
+  const name = nameInput ? nameInput.value.trim() : '';
+  if (errorEl) errorEl.hidden = true;
+
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/api/auth/session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: guestId, password }),
+    });
+  } catch {
+    if (errorEl) { errorEl.textContent = 'Could not reach the server -- check your connection.'; errorEl.hidden = false; }
+    return;
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    if (errorEl) { errorEl.textContent = body.error || 'Wrong password.'; errorEl.hidden = false; }
+    return;
+  }
+
+  const { token, user } = await res.json();
+  state.sessionToken = token;
+  state.user = { id: user.id, name: user.name };
+  persist();
+
+  // Picking a name is part of signing in, not a separate step -- it only
+  // takes effect once the password above has already checked out.
+  if (name && name !== user.name) {
+    try {
+      const renameRes = await fetch(`${API_BASE}/api/me`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name }),
+      });
+      if (renameRes.ok) {
+        const { user: renamed } = await renameRes.json();
+        state.user.name = renamed.name;
+        persist();
+      }
+    } catch { /* sign-in still succeeded even if the rename didn't take */ }
+  }
+
+  showStage('syndicate');
+}
+
 // ---------- Settings ----------
 
 function setPref(name, value) {
@@ -328,6 +408,11 @@ function hydratePrefs() {
   }
 }
 
+function hydrateProfile() {
+  const nameInput = document.getElementById('display-name');
+  if (nameInput && state.user?.name) nameInput.value = state.user.name;
+}
+
 function paintPreview() {
   const checkinTime = document.getElementById('checkin-time')?.value ?? '10:00';
   const bioTime = document.getElementById('bio-time')?.value ?? '08:00';
@@ -372,10 +457,28 @@ function main() {
   paintDeviceBanner();
   paintPreview();
   paintSyndicateName();
+  loadGuestSlots();
+  hydrateProfile();
 
   document.querySelectorAll('.switch[data-pref]').forEach(wireToggle);
   document.getElementById('checkin-time')?.addEventListener('change', paintPreview);
   document.getElementById('bio-time')?.addEventListener('change', paintPreview);
+
+  document.getElementById('display-name')?.addEventListener('change', async (e) => {
+    const name = e.target.value.trim();
+    if (!name || !state.sessionToken) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/me`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.sessionToken}` },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) return;
+      const { user } = await res.json();
+      state.user = { ...state.user, name: user.name };
+      persist();
+    } catch { /* offline -- the typed value stands locally until this saves */ }
+  });
 
   document.body.addEventListener('click', (e) => {
     // Clicking the backdrop itself (not its sheet card) closes it. Checked
@@ -394,8 +497,8 @@ function main() {
     if (el.dataset.claimSeat) { claimSeat(el.dataset.claimSeat, el.dataset.handOff); return; }
 
     switch (el.dataset.role) {
-      case 'sign-in':
-        showStage('syndicate');
+      case 'guest-login':
+        signIn(el.dataset.guestId);
         return;
       case 'join-syndicate':
         showStage('app');
