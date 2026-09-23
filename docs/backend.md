@@ -29,6 +29,7 @@ profile picture is nowhere near KV's 25 MiB per-value limit.
 | `migrations/0008_group_invite_codes.sql` | `groups.invite_code`, unique, backing `POST /api/groups/join` |
 | `migrations/0009_user_contact_info.sql` | `users.phone`, `users.contact_email`, backing `PATCH /api/me` |
 | `migrations/0010_guest_password_auth.sql` | Seeds the six shared-password guest slots (`usr_guest1`..`usr_guest6`) sign-in uses |
+| `migrations/0011_syndicate_seat_labels.sql` | `groups.section`/`seat_row`/`seat_labels`, `group_members.seat_label` -- the real physical seats behind a syndicate, distinct from the internal 1..`total_seats` seat numbering |
 | `seed/dev_seed.sql` | Four members, two fixtures, a part-paid ledger, the squad and all 15 opponent dossiers -- dev only, not safe to run against production (see below); DELETE-then-INSERT throughout, so rerunning it against the same database is a full reset |
 | `seed/roster_seed.sql` | Just the real home roster, safe to run against production (`wrangler d1 execute ... --remote --file=seed/roster_seed.sql`) as a one-off; the sync job is the ongoing way this table gets updated |
 | `seed/opponents_seed.sql` | All 15 real opponent dossiers, safe to run against production -- **not** just an optional bootstrap like the other two seeds; the sync job never creates an opponent row from nothing, only updates ones this file (or an equivalent) already put there. Idempotent (`INSERT ... ON CONFLICT DO UPDATE`, never a DELETE), so rerunning it -- to add a club or fix a typo -- never wipes sync-owned `opponent_players` rows or an admin's hand-edited `form`/`shape_note` |
@@ -116,6 +117,21 @@ their syndicate regardless of who holds it, edit any member's default seat
 number, and promote or demote a member's role -- the override that lets an
 admin fix a seat nobody else involved can (e.g. one whose holder has left the
 syndicate).
+
+`default_seat_number` and `seat_allocations.seat_number` are an internal
+1..`total_seats` index used to assign and track seats -- they are not what's
+printed on anyone's actual ticket. `groups.section`/`seat_row`/`seat_labels`
+(migration `0011`, all optional freeform text, settable at `POST /api/groups`
+time) describe the syndicate's real physical seats -- e.g. Section 114, Row
+8, seat_labels `"3, 4"` -- as one shared block for the whole package, the
+same shape the design export's own mock data uses. `group_members.seat_label`
+(also freeform text, edited the same way and under the same permission rules
+as `default_seat_number` via `PATCH .../members/{user_id}`, or set for the
+creator at creation via `my_seat_label`) is which one of those real seats is
+a given member's own. Neither is validated against the other -- there is no
+constraint tying a `seat_label` to appear in the group's own `seat_labels`
+string -- since both are free text describing the real world, not identifiers
+anything else in the schema joins against.
 
 An admin can also grow or shrink the syndicate itself, via `total_seats` on
 `PATCH /api/groups/{id}`. Growing it retrofits every existing fixture with

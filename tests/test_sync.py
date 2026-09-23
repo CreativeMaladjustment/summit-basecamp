@@ -44,6 +44,7 @@ SCHEMA = [
     os.path.join(ROOT, "migrations", "0008_group_invite_codes.sql"),
     os.path.join(ROOT, "migrations", "0009_user_contact_info.sql"),
     os.path.join(ROOT, "migrations", "0010_guest_password_auth.sql"),
+    os.path.join(ROOT, "migrations", "0011_syndicate_seat_labels.sql"),
 ]
 
 def _season_header(year=2026):

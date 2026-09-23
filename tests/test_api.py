@@ -33,6 +33,7 @@ SCHEMA = [
     os.path.join(ROOT, "migrations", "0008_group_invite_codes.sql"),
     os.path.join(ROOT, "migrations", "0009_user_contact_info.sql"),
     os.path.join(ROOT, "migrations", "0010_guest_password_auth.sql"),
+    os.path.join(ROOT, "migrations", "0011_syndicate_seat_labels.sql"),
 ]
 SEED = os.path.join(ROOT, "seed", "dev_seed.sql")
 
@@ -289,6 +290,73 @@ class ApiTests(unittest.TestCase):
         status, payload = call(self.env, "GET", "/api/groups/" + group_id)
         self.assertEqual(status, 200)
         self.assertEqual(payload["members"][0]["role"], "admin")
+
+    def test_creating_a_syndicate_accepts_section_row_and_seat_labels(self):
+        status, payload = call(
+            self.env,
+            "POST",
+            "/api/groups",
+            body={
+                "name": "Away Day Crew",
+                "season_year": 2027,
+                "total_seats": 2,
+                "package_cost_cents": 100000,
+                "section": "114",
+                "seat_row": "8",
+                "seat_labels": "3, 4",
+                "my_seat_label": "3",
+            },
+        )
+        self.assertEqual(status, 201)
+        group = payload["group"]
+        self.assertEqual(group["section"], "114")
+        self.assertEqual(group["seat_row"], "8")
+        self.assertEqual(group["seat_labels"], "3, 4")
+
+        status, payload = call(self.env, "GET", "/api/groups/" + group["id"])
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["members"][0]["seat_label"], "3")
+
+    def test_creating_a_syndicate_without_seat_details_leaves_them_null(self):
+        status, payload = call(
+            self.env,
+            "POST",
+            "/api/groups",
+            body={
+                "name": "Away Day Crew",
+                "season_year": 2027,
+                "total_seats": 2,
+                "package_cost_cents": 100000,
+            },
+        )
+        self.assertEqual(status, 201)
+        group = payload["group"]
+        self.assertIsNone(group["section"])
+        self.assertIsNone(group["seat_row"])
+        self.assertIsNone(group["seat_labels"])
+
+    def test_a_member_can_set_their_own_seat_label(self):
+        status, payload = call(
+            self.env, "PATCH", "/api/groups/grp_summit/members/usr_ada",
+            body={"seat_label": "3"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["member"]["seat_label"], "3")
+
+        status, _ = call(
+            self.env, "PATCH", "/api/groups/grp_summit/members/usr_ada",
+            body={"seat_label": None},
+        )
+        self.assertEqual(status, 200)
+
+    def test_a_member_cannot_set_another_members_seat_label(self):
+        # usr_bo is a plain member, not the admin -- only usr_ada (admin) or
+        # usr_cyd themselves may edit usr_cyd's seat_label.
+        status, _ = call(
+            self.env, "PATCH", "/api/groups/grp_summit/members/usr_cyd",
+            user="usr_bo", body={"seat_label": "5"},
+        )
+        self.assertEqual(status, 403)
 
     def test_an_admin_can_set_the_total_package_price(self):
         status, payload = call(

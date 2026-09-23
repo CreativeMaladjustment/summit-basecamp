@@ -151,13 +151,34 @@ async def list_groups(request, env, params):
     return json_response({"groups": groups})
 
 
+def _optional_text(body, field):
+    """Pull an optional freeform string out of a parsed body: absent or ''
+    becomes None (nothing set / cleared), otherwise the trimmed string.
+    Same shape as update_me's phone/contact_email handling."""
+    value = body.get(field)
+    if value is not None and not isinstance(value, str):
+        raise ApiError(400, f"{field} must be a string or null")
+    return value.strip() if value and value.strip() else None
+
+
 async def create_group(request, env, params):
+    """Start a syndicate. ``section``/``seat_row``/``seat_labels`` describe
+    the physical seats the whole package holds (e.g. Section 114, Row 8,
+    seats "3, 4") -- freeform text, all optional, distinct from
+    ``total_seats`` and the internal 1..total_seats seat numbering
+    ``create_fixture``/``update_member`` use to track who's assigned where.
+    ``my_seat_label`` is which one of those real seats is the creator's own
+    (they're always seat #1 internally, as the syndicate's first member)."""
     user = await current_user(request, env)
     body = await read_json(request)
     (name,) = require(body, "name")
     season_year = require_int(body, "season_year", minimum=1900)
     total_seats = require_int(body, "total_seats", minimum=1)
     package_cost_cents = require_int(body, "package_cost_cents", minimum=0)
+    section = _optional_text(body, "section")
+    seat_row = _optional_text(body, "seat_row")
+    seat_labels = _optional_text(body, "seat_labels")
+    my_seat_label = _optional_text(body, "my_seat_label")
 
     group_id = new_id("grp")
     invite_code = new_invite_code()
@@ -167,8 +188,9 @@ async def create_group(request, env, params):
             (
                 """
                 INSERT INTO groups
-                    (id, name, season_year, total_seats, package_cost_cents, created_by, invite_code)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (id, name, season_year, total_seats, package_cost_cents,
+                     created_by, invite_code, section, seat_row, seat_labels)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     group_id,
@@ -178,14 +200,17 @@ async def create_group(request, env, params):
                     package_cost_cents,
                     user["id"],
                     invite_code,
+                    section,
+                    seat_row,
+                    seat_labels,
                 ),
             ),
             (
                 """
-                INSERT INTO group_members (group_id, user_id, default_seat_number, role)
-                VALUES (?, ?, ?, 'admin')
+                INSERT INTO group_members (group_id, user_id, default_seat_number, role, seat_label)
+                VALUES (?, ?, ?, 'admin', ?)
                 """,
-                (group_id, user["id"], 1),
+                (group_id, user["id"], 1, my_seat_label),
             ),
         ],
     )
@@ -450,12 +475,13 @@ async def list_members(request, env, params):
 
 async def update_member(request, env, params):
     """Change a member's default seat assignment -- their profile's "Seat
-    assignment" card -- or, admin only, their role.
+    assignment" card -- their own real seat_label (which of the syndicate's
+    physical seats is theirs), or, admin only, their role.
 
-    A member may only edit their own default_seat_number. Only an admin can
-    edit another member's, or change anyone's role; this is what lets an
-    admin move seats around the syndicate rather than each member being
-    stuck with whatever they picked first.
+    A member may only edit their own default_seat_number/seat_label. Only
+    an admin can edit another member's, or change anyone's role; this is
+    what lets an admin move seats around the syndicate rather than each
+    member being stuck with whatever they picked first.
     """
     user = await current_user(request, env)
     group_id = params["group_id"]
@@ -468,8 +494,17 @@ async def update_member(request, env, params):
     target_membership = await require_membership(env, group_id, target_id)
 
     body = await read_json(request)
-    if "default_seat_number" not in body and "role" not in body:
+    if "default_seat_number" not in body and "role" not in body and "seat_label" not in body:
         raise ApiError(400, "Nothing to update")
+
+    if "seat_label" in body:
+        await execute(
+            env,
+            "UPDATE group_members SET seat_label = ? WHERE group_id = ? AND user_id = ?",
+            _optional_text(body, "seat_label"),
+            group_id,
+            target_id,
+        )
 
     if "default_seat_number" in body:
         raw_seat_number = body["default_seat_number"]
@@ -560,7 +595,7 @@ async def update_member(request, env, params):
     updated = await query_one(
         env,
         """
-        SELECT u.id, u.name, u.email, u.avatar_url, m.role, m.default_seat_number
+        SELECT u.id, u.name, u.email, u.avatar_url, m.role, m.default_seat_number, m.seat_label
         FROM group_members m
         JOIN users u ON u.id = m.user_id
         WHERE m.group_id = ? AND m.user_id = ?
@@ -575,7 +610,7 @@ async def _members(env, group_id):
     return await query(
         env,
         """
-        SELECT u.id, u.name, u.email, u.avatar_url, m.role, m.default_seat_number
+        SELECT u.id, u.name, u.email, u.avatar_url, m.role, m.default_seat_number, m.seat_label
         FROM group_members m
         JOIN users u ON u.id = m.user_id
         WHERE m.group_id = ?
