@@ -8,14 +8,18 @@ build time the way the rest of this static site is -- web/src/app.js's
 paintRealFixtures() builds it at runtime from GET /api/groups/{id}/fixtures,
 .../bench-notes and the seat/ledger data paintRealSyndicateDetail already
 fetched. This module only emits the empty shell those functions fill in.
-The Summit Touchline carousel is unrelated daily content (trivia/player/
-tactics notes), not fixture data, and stays fully pre-rendered.
+
+The Summit Touchline carousel's first slide is real data too -- today's
+scouted opponent (GET /api/bios/today, backed by the real `player_bios`
+table, not a syndicate concern so it's account-wide) -- painted at runtime
+by app.js's paintTouchlineBio() into the empty #touchline-bio-slot below.
+The remaining slides (tactics/trivia notes) are unrelated daily content,
+not real per-team data, and stay fully pre-rendered from data.py.
 """
 from __future__ import annotations
 
 from markup import h, Raw
 from icons import svg
-from components import badge
 from data import TOUCHLINE_NOTES
 
 
@@ -41,11 +45,18 @@ def render():
 
 
 def touchline_notes_card():
-    slides = []
-    for i, note in enumerate(TOUCHLINE_NOTES):
+    slide_count = 1 + len(TOUCHLINE_NOTES)  # the real bio slide, plus the static ones
+    slides = [h(
+        "div", {"style": {"animation": "ssPop .2s ease both"}, "data-carousel-slide": "0", "hidden": False},
+        h("div", {"id": "touchline-bio-slot"},
+          h("p", {"cls": "eyebrow"}, "Touchline Scout"),
+          h("p", {"style": {"margin": "8px 0 0", "fontSize": "14px", "color": "var(--ink-mute)"}},
+            "Scouting today's opponent…")),
+    )]
+    for i, note in enumerate(TOUCHLINE_NOTES, start=1):
         slides.append(h(
             "div", {"style": {"animation": "ssPop .2s ease both"}, "data-carousel-slide": str(i),
-                     "hidden": i != 0}, _note_body(note)),
+                     "hidden": True}, _note_body(note)),
         )
 
     dots = h(
@@ -53,12 +64,12 @@ def touchline_notes_card():
         [h("span", {"aria-hidden": "true", "data-carousel-dot": str(i), "style": {
             "width": "18px" if i == 0 else "6px", "height": "6px", "borderRadius": "999px",
             "background": "var(--summit-green)" if i == 0 else "var(--hairline-strong)",
-            "transition": "width .2s ease"}}) for i in range(len(TOUCHLINE_NOTES))],
+            "transition": "width .2s ease"}}) for i in range(slide_count)],
     )
 
     return h(
         "article", {"cls": "card", "style": {"display": "flex", "flexDirection": "column"},
-                     "data-role": "touchline-carousel", "data-count": str(len(TOUCHLINE_NOTES))},
+                     "data-role": "touchline-carousel", "data-count": str(slide_count)},
         h("div", {"style": {"display": "flex", "alignItems": "center", "gap": "8px"}},
           Raw(svg("flame", size=16, stroke="var(--summit-sandstone)")),
           h("p", {"cls": "eyebrow"}, "Summit Touchline")),
@@ -75,20 +86,6 @@ def touchline_notes_card():
 
 
 def _note_body(note):
-    if note["kind"] == "player":
-        return h(
-            "div", {"style": {"display": "flex", "gap": "12px"}},
-            h("div", {"aria-hidden": "true", "style": {
-                "width": "64px", "height": "64px", "borderRadius": "12px", "flex": "none",
-                "background": "repeating-linear-gradient(135deg, var(--surface-sunk) 0 8px, var(--hairline) 8px 16px)"}}),
-            h("div", None,
-              h("p", {"cls": "eyebrow"}, note["eyebrow"]),
-              h("p", {"style": {"margin": "4px 0 0", "display": "flex", "alignItems": "center", "gap": "8px"}},
-                badge(f'#{note["num"]}', "gold"),
-                h("strong", {"style": {"fontFamily": "var(--font-display)", "fontSize": "16px"}}, note["name"])),
-              h("p", {"style": {"margin": "2px 0 0", "fontSize": "12px", "color": "var(--ink-mute)"}}, note["pos"]),
-              h("p", {"style": {"margin": "8px 0 0", "fontSize": "14px", "color": "var(--ink-soft)"}}, note["body"])),
-        )
     if note["kind"] == "tactics":
         return h(
             "div", None,

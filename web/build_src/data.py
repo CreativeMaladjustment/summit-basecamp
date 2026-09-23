@@ -257,10 +257,10 @@ OPPONENTS = [
 ]
 
 # ---------- Summit Touchline Notes ----------
+# The daily scouted-player slide (real player_bios data via GET /api/bios/
+# today) used to be a hardcoded "player" note here -- see matchday.py's
+# touchline_notes_card(), which now paints that slide at runtime instead.
 TOUCHLINE_NOTES = [
-    {"kind": "player", "eyebrow": "Key player to watch", "num": 9, "name": "Yazmeen Ryan",
-     "pos": "Forward · Denver Summit FC",
-     "body": "Wears the 9 up top for Summit this season. See the Locker Room tab for the full squad."},
     {"kind": "tactics", "eyebrow": "Up next", "name": "Kansas City Current, on the road",
      "body": "Denver lost 0–3 to them at home back on 7/3 — the rematch is 9/26, away at CPKC Stadium. See the Visitors tab for the full dossier."},
     {"kind": "trivia", "eyebrow": "Tap to reveal", "question": "What home ground does Denver Summit play at?",
