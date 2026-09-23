@@ -16,7 +16,7 @@ name: Sync roster
 #     current even on a week nothing in this repo changes. Mondays 5am UTC,
 #     the same cadence the removed Cloudflare cron used to run this on.
 #
-# Needs two things set once, in the same "shb" GitHub environment deploy.yml
+# Needs two things set once, in the same "sb" GitHub environment deploy.yml
 # uses:
 #   - secret CF_SYNC_ADMIN_TOKEN: any random string, e.g. `openssl rand -hex
 #     32`. deploy.yml's "Set SYNC_ADMIN_TOKEN secret" step pushes this same
@@ -61,7 +61,7 @@ jobs:
     if: >-
       github.event_name != 'workflow_run'
       || github.event.workflow_run.conclusion == 'success'
-    environment: shb
+    environment: sb
     steps:
       - name: Check required configuration
         shell: bash

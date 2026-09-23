@@ -97,7 +97,7 @@ that already exists, so no job here needs deployment credentials. Deployment
 lives in `.github/workflows/deploy.yml` — see [deploy.md](deploy.md).
 
 Any workflow that *does* deploy must run under the GitHub environment named
-`shb`, which holds the deployment variables and secrets. Put `environment: shb`
+`sb`, which holds the deployment variables and secrets. Put `environment: sb`
 on the deploying job. Two things to watch for: if that environment carries
 protection rules such as required reviewers, a job referencing it pauses until
 someone approves — so keep it off fast pull request checks — and its variables
