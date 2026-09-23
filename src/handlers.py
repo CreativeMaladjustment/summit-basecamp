@@ -623,6 +623,69 @@ async def update_member(request, env, params):
     return json_response({"member": updated})
 
 
+async def leave_group(request, env, params):
+    """A member removes themself from a syndicate.
+
+    Blocked (409) if they're the only admin and other members remain --
+    same reasoning as update_member's demotion guard: leaving would take
+    require_admin's gate with them, locking everyone else out of every
+    admin-only action. Promoting someone else first clears it. Leaving as
+    the last member of all empties the syndicate rather than deleting it --
+    deleting real fixture/ledger history is not something to do implicitly
+    as a side effect of one person's own departure.
+
+    Same atomic-guard shape as the demotion check: the EXISTS clause is
+    embedded in the DELETE itself, not a SELECT beforehand, so a concurrent
+    change to who else is admin can't race past it.
+
+    Any seat this member still holds on an upcoming fixture -- confirmed,
+    gifted, or listed for resale -- is released to the bench right after,
+    so a departed member never stays "holding" a seat nobody else can act
+    on. Past fixtures are left alone; they're history, not something to
+    free up.
+    """
+    user = await current_user(request, env)
+    group_id = params["group_id"]
+    membership = await require_membership(env, group_id, user["id"])
+
+    changed = await execute(
+        env,
+        """
+        DELETE FROM group_members
+        WHERE group_id = ? AND user_id = ?
+          AND (
+            role != 'admin'
+            OR EXISTS (
+              SELECT 1 FROM group_members AS other
+              WHERE other.group_id = ? AND other.role = 'admin' AND other.user_id != ?
+            )
+          )
+        """,
+        group_id,
+        user["id"],
+        group_id,
+        user["id"],
+    )
+    if changed == 0:
+        raise ApiError(409, "Promote another member to admin before you leave")
+
+    await execute(
+        env,
+        """
+        UPDATE seat_allocations
+        SET status = 'on_bench', assigned_user_id = NULL, guest_name = NULL, resale_price_cents = NULL
+        WHERE assigned_user_id = ?
+          AND status IN ('confirmed', 'gifted', 'resale_listed')
+          AND fixture_id IN (
+            SELECT id FROM fixtures WHERE group_id = ? AND datetime(kickoff_at) >= datetime('now')
+          )
+        """,
+        user["id"],
+        group_id,
+    )
+    return json_response({"left": True, "role": membership.get("role")})
+
+
 async def _members(env, group_id):
     return await query(
         env,

@@ -117,21 +117,17 @@ def syndicate():
 def new_syndicate_sheet():
     """Submits to the real POST /api/groups -- name, season, total seats,
     package cost, section/row/seat numbers and the creator's own seat all
-    land in D1, same as everything else this sheet's own fields take. What
-    doesn't follow: every fixture, seat and ledger figure shown elsewhere in
-    this static build is still fixed mock data keyed to a specific seat
-    count and price (web/build_src/data.py), unconnected to whatever group
-    this creates -- resizing those for real is its own, larger piece of
-    work. Said plainly in the sheet's own copy rather than quietly implying
-    more than lands."""
+    land in D1, same as everything else Matchday/Pitch/Bench/The 14ers
+    render for whichever syndicate is currently active (settleIntoSyndicate
+    in app.js just repaints everything against the new group's id). A brand
+    new syndicate simply starts with no fixtures -- add one via Settings/an
+    admin action to see it show up there."""
     return sheet_template("sheet-new-syndicate", [
-        h("p", {"cls": "eyebrow"}, "Find your syndicate"),
+        h("p", {"cls": "eyebrow"}, "New syndicate"),
         h("h2", {"cls": "sheet__title"}, "Start a new syndicate"),
         h("p", {"cls": "sheet__sub"},
-          "Creates a real syndicate you're the admin of. The demo schedule "
-          "and ledger elsewhere in this app don't resize to match it yet -- "
-          "everything on this form itself is real, including which physical "
-          "seats they are and which one is yours."),
+          "Creates a real syndicate you're the admin of, and switches this device to it. "
+          "It starts with no fixtures -- add its first match once you're in."),
         h("form", {"id": "new-syndicate-form"},
           h("label", {"cls": "field"},
             h("span", {"cls": "field__label"}, "Syndicate name"),
@@ -163,6 +159,54 @@ def new_syndicate_sheet():
             "Create syndicate"),
           h("p", {"id": "new-syndicate-error", "role": "alert", "hidden": True, "style": {
               "margin": "10px 0 0", "fontSize": "13px", "color": "var(--summit-sandstone)", "textAlign": "center"}})),
+        h("button", {"cls": "btn btn--ghost btn--block", "type": "button", "style": {"marginTop": "8px"},
+                     "data-close-sheet": "true"}, "Never mind"),
+    ])
+
+
+def join_syndicate_sheet():
+    """A second entry point onto the same POST /api/groups/join joinSyndicate()
+    already drives from Find-your-syndicate -- opened from Campfire Settings
+    so switching which syndicate this device is in doesn't first require
+    signing out. Its own ids (join-syndicate-code / join-syndicate-error) are
+    deliberately distinct from the #invite / #join-syndicate-error pair on
+    that screen, since both sheets sit in the DOM at once."""
+    return sheet_template("sheet-join-syndicate", [
+        h("p", {"cls": "eyebrow"}, "Switch syndicate"),
+        h("h2", {"cls": "sheet__title"}, "Join a different syndicate"),
+        h("p", {"cls": "sheet__sub"},
+          "Switches this device to whichever syndicate the code belongs to. "
+          "Your current one isn't affected -- rejoin it anytime with its own code."),
+        h("label", {"cls": "field"},
+          h("span", {"cls": "field__label"}, "Invite code"),
+          h("input", {"cls": "input", "id": "join-syndicate-code", "placeholder": "e.g. amber-canyon"})),
+        h("button", {"cls": "btn btn--primary btn--block", "type": "button", "style": {"marginTop": "6px"},
+                     "data-role": "post-join-syndicate"}, "Join"),
+        h("p", {"id": "join-syndicate-sheet-error", "role": "alert", "hidden": True, "style": {
+            "margin": "10px 0 0", "fontSize": "13px", "color": "var(--summit-sandstone)", "textAlign": "center"}}),
+        h("button", {"cls": "btn btn--ghost btn--block", "type": "button", "style": {"marginTop": "8px"},
+                     "data-close-sheet": "true"}, "Never mind"),
+    ])
+
+
+def leave_syndicate_sheet():
+    """POSTs to POST /api/groups/{id}/leave. Blocked server-side (409) if
+    this device is the syndicate's only admin -- leaveSyndicate() in app.js
+    surfaces that 409's own message rather than guessing at the reason here,
+    since promoting someone else first is a Members action this sheet
+    doesn't have a path to."""
+    return sheet_template("sheet-leave-syndicate", [
+        h("p", {"cls": "eyebrow"}, "Leave syndicate"),
+        h("h2", {"cls": "sheet__title"}, "Leave this syndicate?"),
+        h("p", {"cls": "sheet__sub"},
+          "You'll lose access to ", h("strong", {"data-role": "syndicate-name"}, "this syndicate"),
+          ". Any seat you're currently holding on an upcoming match goes back to the "
+          "bench for someone else to claim."),
+        h("button", {"cls": "btn btn--primary btn--block", "type": "button",
+                     "style": {"marginTop": "6px", "background": "var(--summit-sandstone)"},
+                     "data-role": "post-leave-syndicate"}, "Leave syndicate"),
+        h("p", {"id": "leave-syndicate-error", "role": "alert", "hidden": True, "style": {
+            "margin": "10px 0 0", "fontSize": "13px", "color": "var(--summit-sandstone)", "textAlign": "center"}}),
         h("button", {"cls": "btn btn--ghost btn--block", "type": "button", "style": {"marginTop": "8px"},
                      "data-close-sheet": "true"}, "Never mind"),
     ])

@@ -1259,8 +1259,12 @@ async function rotateInviteCode() {
   if (codeEl) codeEl.textContent = group.invite_code;
 }
 
-async function joinSyndicate(code) {
-  const errorEl = document.getElementById('join-syndicate-error');
+// Shared by Find-your-syndicate's own join form and Campfire Settings'
+// "Join a different syndicate" sheet -- errorElId lets each report into its
+// own error paragraph rather than one hardcoded to whichever screen wrote
+// this function first.
+async function joinSyndicate(code, errorElId = 'join-syndicate-error') {
+  const errorEl = document.getElementById(errorElId);
   let res;
   try {
     res = await fetch(`${API_BASE}/api/groups/join`, {
@@ -1279,6 +1283,45 @@ async function joinSyndicate(code) {
   }
   const { group } = await res.json();
   settleIntoSyndicate(group);
+}
+
+// This device leaving its current syndicate -- blocked server-side (409) if
+// it's the syndicate's only admin (see handlers.leave_group), surfaced as
+// this thrown error rather than guessed at here. On success, lands wherever
+// a fresh sign-in with whatever memberships are left would (see signIn's
+// own version of this same GET /api/groups dance): straight into a single
+// remaining syndicate, or the picker/join/create screen otherwise.
+async function leaveSyndicate() {
+  const res = await fetch(`${API_BASE}/api/groups/${state.groupId}/leave`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${state.sessionToken}` },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'Could not leave this syndicate.');
+  }
+
+  state.groupId = null;
+  state.syndicateName = null;
+  state.section = null;
+  state.seatRow = null;
+  state.mySeatLabel = null;
+  persist();
+  closeSheet();
+
+  let groups = [];
+  try {
+    const groupsRes = await fetch(`${API_BASE}/api/groups`, { headers: { Authorization: `Bearer ${state.sessionToken}` } });
+    if (groupsRes.ok) ({ groups } = await groupsRes.json());
+  } catch {
+    // offline -- fall through to the empty picker below
+  }
+  if (groups.length === 1) {
+    settleIntoSyndicate(groups[0], groups[0].seat_label || null);
+    return;
+  }
+  showStage('syndicate');
+  paintMySyndicates(groups);
 }
 
 // ---------- Settings ----------
@@ -1494,6 +1537,31 @@ function main() {
         }
         el.disabled = true;
         joinSyndicate(code).finally(() => { el.disabled = false; });
+        return;
+      }
+      case 'post-join-syndicate': {
+        if (el.disabled) return;
+        const codeInput = document.getElementById('join-syndicate-code');
+        const code = codeInput ? codeInput.value.trim() : '';
+        const errorEl = document.getElementById('join-syndicate-sheet-error');
+        if (errorEl) errorEl.hidden = true;
+        if (!code) {
+          if (errorEl) { errorEl.textContent = 'Enter an invite code first.'; errorEl.hidden = false; }
+          codeInput?.focus();
+          return;
+        }
+        el.disabled = true;
+        joinSyndicate(code, 'join-syndicate-sheet-error').finally(() => { el.disabled = false; });
+        return;
+      }
+      case 'post-leave-syndicate': {
+        if (el.disabled) return;
+        const errorEl = document.getElementById('leave-syndicate-error');
+        if (errorEl) errorEl.hidden = true;
+        el.disabled = true;
+        leaveSyndicate()
+          .catch((err) => { if (errorEl) { errorEl.textContent = err.message; errorEl.hidden = false; } })
+          .finally(() => { el.disabled = false; });
         return;
       }
       case 'sign-out':

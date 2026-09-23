@@ -30,6 +30,7 @@ router.add("PATCH", "/api/groups/{group_id}", handlers.update_group)
 router.add("POST", "/api/groups/{group_id}/invite-code/rotate", handlers.rotate_invite_code)
 router.add("GET", "/api/groups/{group_id}/members", handlers.list_members)
 router.add("PATCH", "/api/groups/{group_id}/members/{user_id}", handlers.update_member)
+router.add("POST", "/api/groups/{group_id}/leave", handlers.leave_group)
 
 router.add("GET", "/api/groups/{group_id}/fixtures", handlers.list_fixtures)
 router.add("POST", "/api/groups/{group_id}/fixtures", handlers.create_fixture)

@@ -566,6 +566,74 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["member"]["role"], "member")
 
+    # --- leaving a syndicate ------------------------------------------------
+
+    def test_a_member_can_leave_a_syndicate(self):
+        status, payload = call(self.env, "POST", "/api/groups/grp_summit/leave", user="usr_bo")
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["left"])
+
+        status, payload = call(self.env, "GET", "/api/groups/grp_summit/members")
+        self.assertNotIn("usr_bo", [m["id"] for m in payload["members"]])
+
+    def test_leaving_releases_the_members_upcoming_seats_to_the_bench(self):
+        # seat_002 (fix_001, +3 days) is usr_bo's confirmed seat in the seed.
+        call(self.env, "POST", "/api/groups/grp_summit/leave", user="usr_bo")
+
+        status, payload = call(self.env, "GET", "/api/fixtures/fix_001/seats")
+        self.assertEqual(status, 200)
+        seat = next(s for s in payload["seats"] if s["id"] == "seat_002")
+        self.assertEqual(seat["status"], "on_bench")
+        self.assertIsNone(seat["assigned_user_id"])
+
+    def test_leaving_does_not_touch_a_members_seat_on_a_past_fixture(self):
+        asyncio.run(
+            self.env.DB.prepare(
+                "INSERT INTO fixtures (id, group_id, opponent, kickoff_at, venue, weighted_value_cents)"
+                " VALUES ('fix_past', 'grp_summit', 'Old Rivals', DATETIME('now', '-3 days'), 'Summit Park', 5000)"
+            ).run()
+        )
+        asyncio.run(
+            self.env.DB.prepare(
+                "INSERT INTO seat_allocations (id, fixture_id, seat_number, assigned_user_id, status)"
+                " VALUES ('seat_past', 'fix_past', 2, 'usr_bo', 'confirmed')"
+            ).run()
+        )
+        call(self.env, "POST", "/api/groups/grp_summit/leave", user="usr_bo")
+
+        status, payload = call(self.env, "GET", "/api/fixtures/fix_past/seats")
+        self.assertEqual(status, 200)
+        seat = next(s for s in payload["seats"] if s["id"] == "seat_past")
+        self.assertEqual(seat["status"], "confirmed")
+        self.assertEqual(seat["assigned_user_id"], "usr_bo")
+
+    def test_the_only_admin_cannot_leave_without_promoting_someone(self):
+        # usr_ada is grp_summit's sole admin (see seed/dev_seed.sql).
+        status, payload = call(self.env, "POST", "/api/groups/grp_summit/leave", user="usr_ada")
+        self.assertEqual(status, 409)
+
+        status, payload = call(self.env, "GET", "/api/groups/grp_summit/members")
+        self.assertIn("usr_ada", [m["id"] for m in payload["members"]])
+
+    def test_an_admin_can_leave_once_another_admin_exists(self):
+        call(self.env, "PATCH", "/api/groups/grp_summit/members/usr_bo", body={"role": "admin"})
+        status, payload = call(self.env, "POST", "/api/groups/grp_summit/leave", user="usr_ada")
+        self.assertEqual(status, 200)
+
+        # usr_ada just left -- ask as a member who's still in the syndicate.
+        status, payload = call(self.env, "GET", "/api/groups/grp_summit/members", user="usr_bo")
+        self.assertNotIn("usr_ada", [m["id"] for m in payload["members"]])
+
+    def test_a_non_member_cannot_leave_a_syndicate_they_never_joined(self):
+        asyncio.run(
+            self.env.DB.prepare(
+                "INSERT INTO users (id, email, name, auth_provider, auth_provider_id)"
+                " VALUES ('usr_out', 'out@example.com', 'Out', 'google', 'dev-out')"
+            ).run()
+        )
+        status, payload = call(self.env, "POST", "/api/groups/grp_summit/leave", user="usr_out")
+        self.assertEqual(status, 403)
+
     # --- invite codes -------------------------------------------------------
 
     def test_a_new_syndicate_gets_an_invite_code(self):
