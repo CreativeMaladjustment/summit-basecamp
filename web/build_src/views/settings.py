@@ -128,7 +128,7 @@ def profile_section():
           h("input", {"cls": "input", "value": "You", "id": "display-name"})),
         h("div", {"cls": "card card--sunk", "style": {"marginBottom": "12px"}},
           h("p", {"cls": "eyebrow"}, "Seat assignment"),
-          h("p", {"style": {"margin": "4px 0 0", "fontWeight": "600"}},
+          h("p", {"data-role": "seat-assignment", "style": {"margin": "4px 0 0", "fontWeight": "600"}},
             f'Sec {seat["section"]}, Row {seat["row"]}, Seat {seat["number"]}'),
           h("p", {"data-role": "syndicate-name",
                   "style": {"margin": "2px 0 0", "fontSize": "13px", "color": "var(--ink-mute)",

@@ -9,6 +9,7 @@ every other endpoint goes through: a bearer token is looked up in the
 SESSIONS KV namespace and resolves to a user id.
 """
 
+import hashlib
 import hmac
 import secrets
 
@@ -20,6 +21,12 @@ from responses import ApiError
 # every visit, short enough that rotating SITE_PWD eventually locks out
 # sessions minted under the old one.
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 30
+
+# A device stays trusted for the same length of time, but is additionally
+# tied to *which* SITE_PWD minted it (see start_device_trust) -- so
+# rotating the secret invalidates every outstanding device straight away,
+# not just eventually as its TTL happens to run out.
+DEVICE_TRUST_TTL_SECONDS = 60 * 60 * 24 * 30
 
 
 def verify_site_password(env, password):
@@ -37,6 +44,53 @@ def verify_site_password(env, password):
     # uncaught 500 instead of the same 401 any other wrong password gets.
     if not isinstance(password, str) or not hmac.compare_digest(password, expected):
         raise ApiError(401, "Wrong password")
+
+
+def _password_fingerprint(env):
+    """A one-way SHA-256 digest of the current SITE_PWD, or None if it isn't
+    configured. Stored/compared instead of the password itself -- a digest
+    can't be turned back into the password it came from, so this never
+    reintroduces the clear-text-storage problem start_device_trust exists to
+    avoid, while still letting verify_device_token tell whether SITE_PWD has
+    changed since a given device token was minted."""
+    expected = getattr(env, "SITE_PWD", None)
+    if not expected:
+        return None
+    return hashlib.sha256(expected.encode()).hexdigest()
+
+
+async def start_device_trust(env):
+    """Mint an opaque token proving this device already passed the site
+    password once, and write it into SESSIONS KV as ``device:<token>``,
+    alongside a fingerprint of the password that minted it.
+
+    This is what a device remembers instead of the password itself (see
+    ``begin_session``) -- an opaque, server-issued, independently revocable
+    credential, not the literal shared secret sitting in the browser's own
+    storage for any script on the page to read.
+    """
+    token = secrets.token_hex(32)
+    await env.SESSIONS.put(
+        "device:" + token, _password_fingerprint(env), _ttl_options(DEVICE_TRUST_TTL_SECONDS)
+    )
+    return token
+
+
+async def verify_device_token(env, device_token):
+    """Raise ApiError unless ``device_token`` is a still-valid device-trust
+    token from start_device_trust, minted under the *current* SITE_PWD --
+    one minted under a since-rotated password is rejected immediately, not
+    just once its own TTL eventually runs out."""
+    if not isinstance(device_token, str):
+        raise ApiError(401, "Device is no longer trusted -- enter the site password again")
+    stored_fingerprint = await env.SESSIONS.get("device:" + device_token)
+    current_fingerprint = _password_fingerprint(env)
+    if (
+        not stored_fingerprint
+        or not current_fingerprint
+        or not hmac.compare_digest(stored_fingerprint, current_fingerprint)
+    ):
+        raise ApiError(401, "Device is no longer trusted -- enter the site password again")
 
 
 async def start_session(env, user_id):

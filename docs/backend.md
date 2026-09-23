@@ -29,6 +29,7 @@ profile picture is nowhere near KV's 25 MiB per-value limit.
 | `migrations/0008_group_invite_codes.sql` | `groups.invite_code`, unique, backing `POST /api/groups/join` |
 | `migrations/0009_user_contact_info.sql` | `users.phone`, `users.contact_email`, backing `PATCH /api/me` |
 | `migrations/0010_guest_password_auth.sql` | Seeds the six shared-password guest slots (`usr_guest1`..`usr_guest6`) sign-in uses |
+| `migrations/0011_syndicate_seat_labels.sql` | `groups.section`/`seat_row`/`seat_labels`, `group_members.seat_label` -- the real physical seats behind a syndicate, distinct from the internal 1..`total_seats` seat numbering |
 | `seed/dev_seed.sql` | Four members, two fixtures, a part-paid ledger, the squad and all 15 opponent dossiers -- dev only, not safe to run against production (see below); DELETE-then-INSERT throughout, so rerunning it against the same database is a full reset |
 | `seed/roster_seed.sql` | Just the real home roster, safe to run against production (`wrangler d1 execute ... --remote --file=seed/roster_seed.sql`) as a one-off; the sync job is the ongoing way this table gets updated |
 | `seed/opponents_seed.sql` | All 15 real opponent dossiers, safe to run against production -- **not** just an optional bootstrap like the other two seeds; the sync job never creates an opponent row from nothing, only updates ones this file (or an equivalent) already put there. Idempotent (`INSERT ... ON CONFLICT DO UPDATE`, never a DELETE), so rerunning it -- to add a club or fix a typo -- never wipes sync-owned `opponent_players` rows or an admin's hand-edited `form`/`shape_note` |
@@ -117,6 +118,21 @@ number, and promote or demote a member's role -- the override that lets an
 admin fix a seat nobody else involved can (e.g. one whose holder has left the
 syndicate).
 
+`default_seat_number` and `seat_allocations.seat_number` are an internal
+1..`total_seats` index used to assign and track seats -- they are not what's
+printed on anyone's actual ticket. `groups.section`/`seat_row`/`seat_labels`
+(migration `0011`, all optional freeform text, settable at `POST /api/groups`
+time) describe the syndicate's real physical seats -- e.g. Section 114, Row
+8, seat_labels `"3, 4"` -- as one shared block for the whole package, the
+same shape the design export's own mock data uses. `group_members.seat_label`
+(also freeform text, edited the same way and under the same permission rules
+as `default_seat_number` via `PATCH .../members/{user_id}`, or set for the
+creator at creation via `my_seat_label`) is which one of those real seats is
+a given member's own. Neither is validated against the other -- there is no
+constraint tying a `seat_label` to appear in the group's own `seat_labels`
+string -- since both are free text describing the real world, not identifiers
+anything else in the schema joins against.
+
 An admin can also grow or shrink the syndicate itself, via `total_seats` on
 `PATCH /api/groups/{id}`. Growing it retrofits every existing fixture with
 one new `on_bench` `seat_allocation` per new seat number, the same shape
@@ -173,11 +189,24 @@ write side of `_user_id_from_request`'s read. `GET /api/auth/guests` lists
 all six slots' current names, unauthenticated, so the landing screen can show
 real names to a visitor who has not signed in yet.
 
+The landing screen remembers being trusted, not the password itself: a
+successful password sign-in also returns a `device_token` (`src/auth.
+start_device_trust`, 64 bytes from `secrets`, written into `SESSIONS` KV as
+`device:<token>` with the same 30-day TTL as a session), which the device
+stores client-side instead (a separate `shb.device` localStorage key,
+deliberately not cleared by "sign out" -- see `app.js`'s `DEVICE_KEY`). A
+later sign-in sends that token as `device_token` in place of `password`;
+`verify_device_token` checks it's still a live KV entry. Deliberately not
+the literal shared secret sitting in the browser's own storage for any
+script on the page to read -- CodeQL flagged exactly that in an earlier
+version of this feature, correctly. A device token that no longer works
+(30 days up, or the KV entry never existed) is forgotten automatically on
+the first failed attempt, which brings the password field back.
+
 Each slot starts named "Guest N". `PATCH /api/me` (`src/handlers.update_me`)
-lets whoever is signed into a slot replace that with their own name, which
-then sticks for that slot going forward -- the frontend does this as part of
-signing in (a "Your name" field on the same landing-screen form as the
-password), but nothing about the endpoint ties it to that specific moment.
+lets whoever is signed into a slot replace that with their own name from
+Campfire Settings, which then sticks for that slot going forward; nothing
+about the endpoint ties it to sign-in time specifically.
 
 Set `SITE_PWD` once as a secret in the `sb` GitHub environment; like
 `CF_SYNC_ADMIN_TOKEN`, deploy.yml's "Set SITE_PWD secret" step pushes it to
@@ -382,20 +411,24 @@ wrongly-skipped one just never appears at all.
 - **Weighted payouts.** `split_equally` splits an expense evenly. Weighting by
   fixture tier and crediting members who bench a seat are still being decided;
   when they land, that one function changes.
-- **The frontend calls this API in exactly one place.** `web/index.html` is
+- **The frontend calls this API from three screens.** `web/index.html` is
   still a static build (`web/build_src/build.py`) from mock data in
   `web/build_src/data.py`, and `web/src/app.js` still mostly just toggles
-  pre-rendered DOM. Sign-in (see "Sign-in" above) is the one real exception --
-  `POST /api/auth/session`, `GET /api/auth/guests` and `PATCH /api/me` are
-  now reachable from the deployed site, using `API_BASE` (`app.js`, hardcoded
-  to the Worker's own hostname -- update it by hand the same way
-  `CF_API_BASE_URL` already needs updating on a Worker rename, see
-  `docs/deploy.md`). Every other endpoint above -- the syndicate/fixture/seat
-  data, the ledger, avatar upload -- is real and tested (`tests/test_api.py`)
-  but still not reachable from the deployed site; a signed-in session now
-  exists to authenticate those calls with, but wiring each screen up to real
-  data is still its own piece of work, not something this change set
-  attempts to close.
+  pre-rendered DOM. Sign-in, "Find your syndicate," and the Settings profile
+  card are the real exceptions -- `POST /api/auth/session`,
+  `GET /api/auth/guests`, `PATCH /api/me`, `POST /api/groups` and
+  `POST /api/groups/join` are all reachable from the deployed site, using
+  `API_BASE` (`app.js`, hardcoded to the Worker's own hostname -- update it
+  by hand the same way `CF_API_BASE_URL` already needs updating on a Worker
+  rename, see `docs/deploy.md`). Creating or joining a syndicate this way is
+  real -- it lands in D1, and the creator is genuinely its admin -- but
+  nothing else in this static build resizes to match it: Matchday, the 14er
+  Pass, the Bench and the 14ers ledger all still render the same fixed mock
+  fixtures/seats/ledger regardless of which real group `state.groupId` names.
+  Every other endpoint above -- fixtures, seats, the ledger, avatar upload --
+  is real and tested (`tests/test_api.py`) but still not reachable from the
+  deployed site; wiring each of those screens up to real data is still its
+  own piece of work, not something this change set attempts to close.
 
 ## Testing
 

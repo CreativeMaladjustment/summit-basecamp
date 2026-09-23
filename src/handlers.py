@@ -13,7 +13,9 @@ from auth import (
     current_user,
     require_admin,
     require_membership,
+    start_device_trust,
     start_session,
+    verify_device_token,
     verify_site_password,
 )
 from db import batch, execute, new_id, new_invite_code, query, query_one
@@ -59,14 +61,29 @@ async def list_guest_slots(request, env, params):
 
 
 async def begin_session(request, env, params):
-    """Sign in to one of the six shared guest slots with the site password.
+    """Sign in to one of the six shared guest slots with the site password,
+    or with a device_token a previous call already returned in its place.
 
     This is an access gate, not per-person auth: every slot accepts the same
     SITE_PWD Worker secret, and the caller just picks which slot they are.
+    Only one of password/device_token is required. Proving the caller's
+    device already passed the site password once (device_token) returns
+    that same still-valid token back; proving it fresh (password) mints a
+    new one -- either way the device stores whatever token comes back
+    instead of the raw password itself, so a successful sign-in never
+    leaves the literal shared secret sitting in the browser's own storage
+    (see src/auth.start_device_trust).
     """
     body = await read_json(request)
-    (user_id, password) = require(body, "user_id", "password")
-    verify_site_password(env, password)
+    (user_id,) = require(body, "user_id")
+    device_token = body.get("device_token")
+    if device_token:
+        await verify_device_token(env, device_token)
+        new_device_token = device_token
+    else:
+        (password,) = require(body, "password")
+        verify_site_password(env, password)
+        new_device_token = await start_device_trust(env)
 
     user = await query_one(
         env, "SELECT * FROM users WHERE id = ? AND auth_provider = 'password'", user_id
@@ -75,7 +92,7 @@ async def begin_session(request, env, params):
         raise ApiError(400, "Not a valid login")
 
     token = await start_session(env, user["id"])
-    return json_response({"token": token, "user": user})
+    return json_response({"token": token, "user": user, "device_token": new_device_token})
 
 
 async def get_me(request, env, params):
@@ -151,13 +168,34 @@ async def list_groups(request, env, params):
     return json_response({"groups": groups})
 
 
+def _optional_text(body, field):
+    """Pull an optional freeform string out of a parsed body: absent or ''
+    becomes None (nothing set / cleared), otherwise the trimmed string.
+    Same shape as update_me's phone/contact_email handling."""
+    value = body.get(field)
+    if value is not None and not isinstance(value, str):
+        raise ApiError(400, f"{field} must be a string or null")
+    return value.strip() if value and value.strip() else None
+
+
 async def create_group(request, env, params):
+    """Start a syndicate. ``section``/``seat_row``/``seat_labels`` describe
+    the physical seats the whole package holds (e.g. Section 114, Row 8,
+    seats "3, 4") -- freeform text, all optional, distinct from
+    ``total_seats`` and the internal 1..total_seats seat numbering
+    ``create_fixture``/``update_member`` use to track who's assigned where.
+    ``my_seat_label`` is which one of those real seats is the creator's own
+    (they're always seat #1 internally, as the syndicate's first member)."""
     user = await current_user(request, env)
     body = await read_json(request)
     (name,) = require(body, "name")
     season_year = require_int(body, "season_year", minimum=1900)
     total_seats = require_int(body, "total_seats", minimum=1)
     package_cost_cents = require_int(body, "package_cost_cents", minimum=0)
+    section = _optional_text(body, "section")
+    seat_row = _optional_text(body, "seat_row")
+    seat_labels = _optional_text(body, "seat_labels")
+    my_seat_label = _optional_text(body, "my_seat_label")
 
     group_id = new_id("grp")
     invite_code = new_invite_code()
@@ -167,8 +205,9 @@ async def create_group(request, env, params):
             (
                 """
                 INSERT INTO groups
-                    (id, name, season_year, total_seats, package_cost_cents, created_by, invite_code)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (id, name, season_year, total_seats, package_cost_cents,
+                     created_by, invite_code, section, seat_row, seat_labels)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     group_id,
@@ -178,14 +217,17 @@ async def create_group(request, env, params):
                     package_cost_cents,
                     user["id"],
                     invite_code,
+                    section,
+                    seat_row,
+                    seat_labels,
                 ),
             ),
             (
                 """
-                INSERT INTO group_members (group_id, user_id, default_seat_number, role)
-                VALUES (?, ?, ?, 'admin')
+                INSERT INTO group_members (group_id, user_id, default_seat_number, role, seat_label)
+                VALUES (?, ?, ?, 'admin', ?)
                 """,
-                (group_id, user["id"], 1),
+                (group_id, user["id"], 1, my_seat_label),
             ),
         ],
     )
@@ -450,12 +492,13 @@ async def list_members(request, env, params):
 
 async def update_member(request, env, params):
     """Change a member's default seat assignment -- their profile's "Seat
-    assignment" card -- or, admin only, their role.
+    assignment" card -- their own real seat_label (which of the syndicate's
+    physical seats is theirs), or, admin only, their role.
 
-    A member may only edit their own default_seat_number. Only an admin can
-    edit another member's, or change anyone's role; this is what lets an
-    admin move seats around the syndicate rather than each member being
-    stuck with whatever they picked first.
+    A member may only edit their own default_seat_number/seat_label. Only
+    an admin can edit another member's, or change anyone's role; this is
+    what lets an admin move seats around the syndicate rather than each
+    member being stuck with whatever they picked first.
     """
     user = await current_user(request, env)
     group_id = params["group_id"]
@@ -468,8 +511,17 @@ async def update_member(request, env, params):
     target_membership = await require_membership(env, group_id, target_id)
 
     body = await read_json(request)
-    if "default_seat_number" not in body and "role" not in body:
+    if "default_seat_number" not in body and "role" not in body and "seat_label" not in body:
         raise ApiError(400, "Nothing to update")
+
+    if "seat_label" in body:
+        await execute(
+            env,
+            "UPDATE group_members SET seat_label = ? WHERE group_id = ? AND user_id = ?",
+            _optional_text(body, "seat_label"),
+            group_id,
+            target_id,
+        )
 
     if "default_seat_number" in body:
         raw_seat_number = body["default_seat_number"]
@@ -560,7 +612,7 @@ async def update_member(request, env, params):
     updated = await query_one(
         env,
         """
-        SELECT u.id, u.name, u.email, u.avatar_url, m.role, m.default_seat_number
+        SELECT u.id, u.name, u.email, u.avatar_url, m.role, m.default_seat_number, m.seat_label
         FROM group_members m
         JOIN users u ON u.id = m.user_id
         WHERE m.group_id = ? AND m.user_id = ?
@@ -575,7 +627,7 @@ async def _members(env, group_id):
     return await query(
         env,
         """
-        SELECT u.id, u.name, u.email, u.avatar_url, m.role, m.default_seat_number
+        SELECT u.id, u.name, u.email, u.avatar_url, m.role, m.default_seat_number, m.seat_label
         FROM group_members m
         JOIN users u ON u.id = m.user_id
         WHERE m.group_id = ?
