@@ -211,6 +211,26 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 401)
 
+    def test_rotating_site_pwd_invalidates_outstanding_device_tokens(self):
+        # A device token is fingerprinted to the password that minted it
+        # (src/auth._password_fingerprint), so rotating SITE_PWD rejects it
+        # immediately -- not just once its own 30-day TTL happens to run
+        # out, which would otherwise let an old device sign in for up to a
+        # month after the password it trusted was retired.
+        env = make_env(SCHEMA, SEED, site_pwd="letmein")
+        _, payload = call(
+            env, "POST", "/api/auth/session", user=None,
+            body={"user_id": "usr_guest1", "password": "letmein"},
+        )
+        device_token = payload["device_token"]
+
+        env.SITE_PWD = "newpassword"
+        status, _ = call(
+            env, "POST", "/api/auth/session", user=None,
+            body={"user_id": "usr_guest1", "device_token": device_token},
+        )
+        self.assertEqual(status, 401)
+
     def test_sign_in_with_neither_password_nor_device_token_is_400(self):
         env = make_env(SCHEMA, SEED, site_pwd="letmein")
         status, payload = call(

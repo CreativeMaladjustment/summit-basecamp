@@ -542,15 +542,24 @@ function paintSyndicateName() {
 // Settings' "Seat assignment" card -- the real section/row/seat this device
 // last created or was told about, once any of the three is known. Parts
 // that were never set (e.g. a syndicate created with no section given)
-// just don't appear, rather than showing "Sec null".
+// just don't appear, rather than showing "Sec null". Captured once, before
+// this ever writes to the node, so joining or creating a *different*
+// syndicate later with no seat details restores the static build's own
+// placeholder instead of leaving the previous syndicate's real seat
+// showing.
+let staticSeatAssignmentText = null;
+
 function paintSeatAssignment() {
-  if (!state.section && !state.seatRow && !state.mySeatLabel) return;
+  const nodes = document.querySelectorAll('[data-role="seat-assignment"]');
+  if (staticSeatAssignmentText === null && nodes.length) {
+    staticSeatAssignmentText = nodes[0].textContent;
+  }
   const parts = [];
   if (state.section) parts.push(`Sec ${state.section}`);
   if (state.seatRow) parts.push(`Row ${state.seatRow}`);
   if (state.mySeatLabel) parts.push(`Seat ${state.mySeatLabel}`);
-  const text = parts.join(', ');
-  for (const node of document.querySelectorAll('[data-role="seat-assignment"]')) {
+  const text = parts.length ? parts.join(', ') : staticSeatAssignmentText;
+  for (const node of nodes) {
     node.textContent = text;
   }
 }
@@ -624,6 +633,7 @@ function main() {
         signIn(el.dataset.guestId);
         return;
       case 'join-syndicate': {
+        if (el.disabled) return; // a request is already in flight
         const codeInput = document.getElementById('invite');
         const code = codeInput ? codeInput.value.trim() : '';
         const errorEl = document.getElementById('join-syndicate-error');
@@ -633,7 +643,8 @@ function main() {
           codeInput?.focus();
           return;
         }
-        joinSyndicate(code);
+        el.disabled = true;
+        joinSyndicate(code).finally(() => { el.disabled = false; });
         return;
       }
       case 'sign-out':
@@ -842,38 +853,51 @@ function main() {
     const name = nameInput.value.trim();
     if (!name) { nameInput.focus(); return; }
 
-    const errorEl = document.getElementById('new-syndicate-error');
-    if (errorEl) errorEl.hidden = true;
-    const seasonYear = Number(document.getElementById('new-syn-season').value) || 2026;
-    const totalSeats = Number(document.getElementById('new-syn-seats').value) || 1;
-    const costInput = document.getElementById('new-syn-cost');
-    const packageCostCents = costInput.value ? Math.round(Number(costInput.value) * 100) : 0;
-    const section = document.getElementById('new-syn-section').value.trim();
-    const seatRow = document.getElementById('new-syn-row').value.trim();
-    const seatLabels = document.getElementById('new-syn-seat-labels').value.trim();
-    const mySeatLabel = document.getElementById('new-syn-my-seat').value.trim();
+    // Guards against a double-click or two quick Enter presses creating two
+    // real syndicates before either request settles -- re-enabled in the
+    // finally below on every exit path, success or failure alike.
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    if (submitBtn) {
+      if (submitBtn.disabled) return;
+      submitBtn.disabled = true;
+    }
 
-    let res;
     try {
-      res = await fetch(`${API_BASE}/api/groups`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.sessionToken}` },
-        body: JSON.stringify({
-          name, season_year: seasonYear, total_seats: totalSeats, package_cost_cents: packageCostCents,
-          section, seat_row: seatRow, seat_labels: seatLabels, my_seat_label: mySeatLabel,
-        }),
-      });
-    } catch {
-      if (errorEl) { errorEl.textContent = 'Could not reach the server -- check your connection.'; errorEl.hidden = false; }
-      return;
+      const errorEl = document.getElementById('new-syndicate-error');
+      if (errorEl) errorEl.hidden = true;
+      const seasonYear = Number(document.getElementById('new-syn-season').value) || 2026;
+      const totalSeats = Number(document.getElementById('new-syn-seats').value) || 1;
+      const costInput = document.getElementById('new-syn-cost');
+      const packageCostCents = costInput.value ? Math.round(Number(costInput.value) * 100) : 0;
+      const section = document.getElementById('new-syn-section').value.trim();
+      const seatRow = document.getElementById('new-syn-row').value.trim();
+      const seatLabels = document.getElementById('new-syn-seat-labels').value.trim();
+      const mySeatLabel = document.getElementById('new-syn-my-seat').value.trim();
+
+      let res;
+      try {
+        res = await fetch(`${API_BASE}/api/groups`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.sessionToken}` },
+          body: JSON.stringify({
+            name, season_year: seasonYear, total_seats: totalSeats, package_cost_cents: packageCostCents,
+            section, seat_row: seatRow, seat_labels: seatLabels, my_seat_label: mySeatLabel,
+          }),
+        });
+      } catch {
+        if (errorEl) { errorEl.textContent = 'Could not reach the server -- check your connection.'; errorEl.hidden = false; }
+        return;
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        if (errorEl) { errorEl.textContent = body.error || 'Could not create the syndicate.'; errorEl.hidden = false; }
+        return;
+      }
+      const { group } = await res.json();
+      settleIntoSyndicate(group, mySeatLabel || null);
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
     }
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      if (errorEl) { errorEl.textContent = body.error || 'Could not create the syndicate.'; errorEl.hidden = false; }
-      return;
-    }
-    const { group } = await res.json();
-    settleIntoSyndicate(group, mySeatLabel || null);
   });
 }
 
