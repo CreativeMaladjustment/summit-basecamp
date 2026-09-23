@@ -13,15 +13,53 @@ def new_id(prefix):
     return "{}_{}".format(prefix, uuid.uuid4().hex[:16])
 
 
+_INVITE_ADJECTIVES = [
+    "amber", "aspen", "basalt", "birch", "blaze", "bold", "brave", "bright",
+    "brisk", "calm", "cedar", "clear", "cliff", "cloudy", "cobalt", "coral",
+    "cozy", "crisp", "daring", "dawn", "dusty", "eager", "early", "ember",
+    "fern", "fleet", "flint", "fresh", "frosty", "gilded", "glacial",
+    "golden", "granite", "gritty", "harbor", "hazel", "highland", "hollow",
+    "humble", "ivory", "jagged", "jolly", "keen", "lively", "lofty", "lucky",
+    "lush", "maple", "meadow", "misty", "mossy", "nimble", "noble", "north",
+    "oaken", "olive", "onyx", "opal", "pine", "proud", "quiet", "quick",
+    "rapid", "ridge", "rocky", "rowdy", "royal", "rugged", "rustic", "sandy",
+    "scarlet", "shady", "silver", "sleepy", "sly", "spruce", "steady",
+    "stony", "stormy", "sturdy", "summit", "sunny", "swift", "tidy",
+    "timber", "trusty", "tundra", "upbeat", "vast", "vivid", "warm",
+    "willow", "windy", "wooly", "zesty",
+]
+_INVITE_NOUNS = [
+    "alpine", "anthem", "arena", "aspen", "attack", "avalanche", "banner",
+    "basin", "bench", "boulder", "canyon", "captain", "cedar", "chalet",
+    "cinder", "cleats", "cliff", "corner", "crest", "crossbar", "crowd",
+    "current", "delta", "divide", "eagle", "echo", "falcon", "field",
+    "firepit", "flare", "glacier", "grove", "gully", "harbor", "hawk",
+    "hearth", "highland", "horizon", "keeper", "kestrel", "ledge", "lodge",
+    "lookout", "meadow", "midfield", "outpost", "overlook", "pass",
+    "peak", "pinnacle", "pitch", "plateau", "range", "raven", "ravine",
+    "ridge", "river", "rookie", "roster", "saddle", "scout", "signal",
+    "slope", "spire", "spruce", "striker", "summit", "supporter",
+    "syndicate", "tailgate", "terrace", "thicket", "thunder", "tifo",
+    "torrent", "touchline", "trail", "trailhead", "trek", "tundra",
+    "tunnel", "valley", "vantage", "vista", "whistle", "wildflower",
+    "wingback", "wolfpack",
+]
+
+
 def new_invite_code():
-    """A code a person can type to join a syndicate -- shorter than the
-    prefixed ids ``new_id`` makes, but still a bearer credential with
-    nothing else gating it (POST /api/groups/join has no throttling or
-    expiry), so it needs real entropy rather than just being short and
-    memorable. 16 hex characters from ``secrets`` (64 bits, cryptographically
-    random) makes guessing one by brute force over the network infeasible,
-    unlike a shorter code -- e.g. ``9F2C4E91A8D6B0C3``."""
-    return secrets.token_hex(8).upper()
+    """A short, easy-to-say two-word code a person can type to join a
+    syndicate, e.g. ``AMBER-CANYON`` -- traded down from a 16-hex-character
+    code (64 bits) for memorability. That leaves less entropy (95 x 88 word
+    pairs, ~13 bits) than would be safe as a lone gate on its own:
+    accepted here because it's not one -- this app already sits behind one
+    shared site password (see the guest sign-in gate), so a code leaking is a
+    lesser event than the site password itself leaking, and
+    rotate_invite_code lets an admin kill a leaked or no-longer-wanted code
+    instantly. POST /api/groups/join still has no throttling or expiry, so
+    don't reuse this generator anywhere a code needs to stand on its own."""
+    return "{}-{}".format(
+        secrets.choice(_INVITE_ADJECTIVES), secrets.choice(_INVITE_NOUNS)
+    ).upper()
 
 
 def _statement(env, sql, params):

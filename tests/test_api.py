@@ -581,7 +581,13 @@ class ApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(status, 201)
-        self.assertTrue(payload["group"]["invite_code"])
+        code = payload["group"]["invite_code"]
+        self.assertTrue(code)
+        # Two hyphen-joined words, upper-cased -- see db.new_invite_code for
+        # why this traded entropy for memorability.
+        parts = code.split("-")
+        self.assertEqual(len(parts), 2)
+        self.assertTrue(all(p.isalpha() and p == p.upper() for p in parts))
 
     def test_joining_by_invite_code_adds_a_member(self):
         asyncio.run(
