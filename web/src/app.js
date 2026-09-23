@@ -388,10 +388,55 @@ async function signIn(guestId) {
   state.sessionToken = token;
   state.user = user; // full row -- id, name, phone, contact_email, ...
   persist();
+
+  // Whoever this guest slot really is (see update_me / migration 0010) may
+  // already be a real member of a syndicate someone else set up -- ask the
+  // backend rather than always dropping them on create/join. One match
+  // skips this screen entirely; more than one lists them to pick from;
+  // none, or the request failing, falls back to today's create/join screen.
+  let groups = [];
+  try {
+    const groupsRes = await fetch(`${API_BASE}/api/groups`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (groupsRes.ok) ({ groups } = await groupsRes.json());
+  } catch {
+    // offline or unreachable -- fall through to create/join, same as before
+  }
+
+  if (groups.length === 1) {
+    settleIntoSyndicate(groups[0], groups[0].seat_label || null);
+    return;
+  }
   showStage('syndicate');
+  paintMySyndicates(groups);
 }
 
 // ---------- Find your syndicate: join or create for real ----------
+
+let myGroupsCache = [];
+
+// Fills in the "Your syndicates" picker on the Find-your-syndicate screen
+// with whatever GET /api/groups just returned -- only reached (see signIn)
+// when that's 2+ real memberships, since exactly one skips this screen and
+// settles straight into it instead.
+function paintMySyndicates(groups) {
+  myGroupsCache = groups;
+  const container = document.getElementById('my-syndicates');
+  const list = document.getElementById('my-syndicate-list');
+  if (!container || !list) return;
+  list.innerHTML = '';
+  for (const group of groups) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn--primary btn--block';
+    btn.dataset.role = 'select-syndicate';
+    btn.dataset.groupId = group.id;
+    btn.textContent = group.name;
+    list.appendChild(btn);
+  }
+  container.hidden = groups.length === 0;
+}
 
 // Shared by both a successful join and a successful create -- the group
 // this device is now "in", cosmetically, for the rest of this static build
@@ -632,6 +677,11 @@ function main() {
       case 'guest-login':
         signIn(el.dataset.guestId);
         return;
+      case 'select-syndicate': {
+        const group = myGroupsCache.find((g) => g.id === el.dataset.groupId);
+        if (group) settleIntoSyndicate(group, group.seat_label || null);
+        return;
+      }
       case 'join-syndicate': {
         if (el.disabled) return; // a request is already in flight
         const codeInput = document.getElementById('invite');
