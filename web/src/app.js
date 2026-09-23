@@ -339,23 +339,43 @@ function balanceLineText(cents) {
   return cents > 0 ? `The circle holds your ${moneyCents(cents)}.` : `You hold the tab (${moneyCents(Math.abs(cents))}).`;
 }
 
+// One retry after a short pause, for a fetch whose failure would otherwise
+// leave a *different*, fabricated-looking syndicate's demo numbers on
+// screen indefinitely (see paintRealSyndicateDetail below) -- worth a
+// second try before accepting that, since the most common real-world cause
+// is a single dropped request, not a real outage.
+async function fetchWithOneRetry(url, options) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const res = await fetch(url, options);
+      if (res.ok) return res;
+    } catch {
+      // fall through to retry/give up below
+    }
+    if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 1200));
+  }
+  return null;
+}
+
 // Overwrites the 14ers ledger card and the header's "N seats · Sec/Row"
 // readout -- both pre-rendered with invented demo numbers (web/build_src/
 // data.py) -- with this syndicate's real GET /api/groups/{id} and
 // .../ledger data: real price, real seat/member counts, and real per-member
 // balances (net_balances/settle_plan; an evenly-split expense ledger, no
 // tier weighting) instead of the mock weighted-by-tier breakdown. A no-op
-// until there is a real syndicate and session to ask about, and silently
-// leaves the demo numbers in place if either call fails -- there is nothing
-// actionable to show the caller here beyond what's already on screen.
+// until there is a real syndicate and session to ask about. The group
+// fetch gets one retry (fetchWithOneRetry) before giving up, since failing
+// silently here doesn't just leave stale numbers on screen -- it leaves a
+// *different*, wrong-looking syndicate's invented name and seat count
+// displayed as if real, with nothing to say otherwise.
 async function paintRealSyndicateDetail() {
   if (!state.groupId || !state.sessionToken) return;
   const authHeaders = { Authorization: `Bearer ${state.sessionToken}` };
 
   let group, members;
+  const groupRes = await fetchWithOneRetry(`${API_BASE}/api/groups/${state.groupId}`, { headers: authHeaders });
+  if (!groupRes) return;
   try {
-    const groupRes = await fetch(`${API_BASE}/api/groups/${state.groupId}`, { headers: authHeaders });
-    if (!groupRes.ok) return;
     ({ group, members } = await groupRes.json());
   } catch {
     return;
