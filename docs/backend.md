@@ -189,12 +189,19 @@ write side of `_user_id_from_request`'s read. `GET /api/auth/guests` lists
 all six slots' current names, unauthenticated, so the landing screen can show
 real names to a visitor who has not signed in yet.
 
-The landing screen also remembers the password itself, client-side (a
-separate `shb.pwd` localStorage key, deliberately not cleared by "sign
-out" -- see `app.js`'s `PWD_KEY`), so a returning visitor on the same
-device skips straight to picking a guest slot. A password that no longer
-works (e.g. `SITE_PWD` rotated) is forgotten automatically on the first
-failed attempt, which brings the password field back.
+The landing screen remembers being trusted, not the password itself: a
+successful password sign-in also returns a `device_token` (`src/auth.
+start_device_trust`, 64 bytes from `secrets`, written into `SESSIONS` KV as
+`device:<token>` with the same 30-day TTL as a session), which the device
+stores client-side instead (a separate `shb.device` localStorage key,
+deliberately not cleared by "sign out" -- see `app.js`'s `DEVICE_KEY`). A
+later sign-in sends that token as `device_token` in place of `password`;
+`verify_device_token` checks it's still a live KV entry. Deliberately not
+the literal shared secret sitting in the browser's own storage for any
+script on the page to read -- CodeQL flagged exactly that in an earlier
+version of this feature, correctly. A device token that no longer works
+(30 days up, or the KV entry never existed) is forgotten automatically on
+the first failed attempt, which brings the password field back.
 
 Each slot starts named "Guest N". `PATCH /api/me` (`src/handlers.update_me`)
 lets whoever is signed into a slot replace that with their own name from

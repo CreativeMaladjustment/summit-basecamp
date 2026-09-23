@@ -13,7 +13,9 @@ from auth import (
     current_user,
     require_admin,
     require_membership,
+    start_device_trust,
     start_session,
+    verify_device_token,
     verify_site_password,
 )
 from db import batch, execute, new_id, new_invite_code, query, query_one
@@ -59,14 +61,29 @@ async def list_guest_slots(request, env, params):
 
 
 async def begin_session(request, env, params):
-    """Sign in to one of the six shared guest slots with the site password.
+    """Sign in to one of the six shared guest slots with the site password,
+    or with a device_token a previous call already returned in its place.
 
     This is an access gate, not per-person auth: every slot accepts the same
     SITE_PWD Worker secret, and the caller just picks which slot they are.
+    Only one of password/device_token is required. Proving the caller's
+    device already passed the site password once (device_token) returns
+    that same still-valid token back; proving it fresh (password) mints a
+    new one -- either way the device stores whatever token comes back
+    instead of the raw password itself, so a successful sign-in never
+    leaves the literal shared secret sitting in the browser's own storage
+    (see src/auth.start_device_trust).
     """
     body = await read_json(request)
-    (user_id, password) = require(body, "user_id", "password")
-    verify_site_password(env, password)
+    (user_id,) = require(body, "user_id")
+    device_token = body.get("device_token")
+    if device_token:
+        await verify_device_token(env, device_token)
+        new_device_token = device_token
+    else:
+        (password,) = require(body, "password")
+        verify_site_password(env, password)
+        new_device_token = await start_device_trust(env)
 
     user = await query_one(
         env, "SELECT * FROM users WHERE id = ? AND auth_provider = 'password'", user_id
@@ -75,7 +92,7 @@ async def begin_session(request, env, params):
         raise ApiError(400, "Not a valid login")
 
     token = await start_session(env, user["id"])
-    return json_response({"token": token, "user": user})
+    return json_response({"token": token, "user": user, "device_token": new_device_token})
 
 
 async def get_me(request, env, params):

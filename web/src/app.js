@@ -290,30 +290,34 @@ function wirePhotoSlots() {
 
 // ---------- Sign-in: shared-password gate over six fixed guest slots ------
 
-// The site password, remembered separately from PWD_KEY -- shb.v2 (the
-// state persisted under KEY) is wiped wholesale on sign-out, but the
-// password itself isn't tied to any one guest slot, so a device that
-// already knows it should still skip straight to picking a user next time
+// What a device remembers instead of the site password itself, once
+// POST /api/auth/session has verified that password at least once -- an
+// opaque, server-issued, independently revocable token (src/auth.py's
+// start_device_trust), not the literal shared secret sitting in this
+// browser's own storage for any script on the page to read. Kept separate
+// from DEVICE_KEY -- shb.v2 (the state persisted under KEY) is wiped
+// wholesale on sign-out, but this device's trust isn't tied to any one
+// guest slot, so it should still skip straight to picking a user next time
 // even after someone signs out.
-const PWD_KEY = 'shb.pwd';
+const DEVICE_KEY = 'shb.device';
 
-function loadSavedPassword() {
-  try { return localStorage.getItem(PWD_KEY); } catch { return null; }
+function loadDeviceToken() {
+  try { return localStorage.getItem(DEVICE_KEY); } catch { return null; }
 }
 
-function saveSavedPassword(password) {
-  try { localStorage.setItem(PWD_KEY, password); } catch { /* private mode */ }
+function saveDeviceToken(token) {
+  try { localStorage.setItem(DEVICE_KEY, token); } catch { /* private mode */ }
 }
 
-function forgetSavedPassword() {
-  try { localStorage.removeItem(PWD_KEY); } catch { /* private mode */ }
+function forgetDeviceToken() {
+  try { localStorage.removeItem(DEVICE_KEY); } catch { /* private mode */ }
 }
 
-// Hides the password field entirely once this device already knows it, so
-// returning just means picking a guest slot.
+// Hides the password field entirely once this device is already trusted,
+// so returning just means picking a guest slot.
 function paintPasswordField() {
   const field = document.getElementById('password-field');
-  if (field) field.hidden = !!loadSavedPassword();
+  if (field) field.hidden = !!loadDeviceToken();
 }
 
 // Static "Guest N" labels are what the build renders; this repaints them
@@ -339,14 +343,20 @@ async function loadGuestSlots() {
 async function signIn(guestId) {
   const passwordInput = document.getElementById('site-password');
   const errorEl = document.getElementById('sign-in-error');
-  const remembered = loadSavedPassword();
-  const password = remembered ?? (passwordInput ? passwordInput.value : '');
+  const deviceToken = loadDeviceToken();
   if (errorEl) errorEl.hidden = true;
 
-  if (!password) {
-    if (errorEl) { errorEl.textContent = 'Enter the site password first.'; errorEl.hidden = false; }
-    passwordInput?.focus();
-    return;
+  let requestBody;
+  if (deviceToken) {
+    requestBody = { user_id: guestId, device_token: deviceToken };
+  } else {
+    const password = passwordInput ? passwordInput.value : '';
+    if (!password) {
+      if (errorEl) { errorEl.textContent = 'Enter the site password first.'; errorEl.hidden = false; }
+      passwordInput?.focus();
+      return;
+    }
+    requestBody = { user_id: guestId, password };
   }
 
   let res;
@@ -354,18 +364,18 @@ async function signIn(guestId) {
     res = await fetch(`${API_BASE}/api/auth/session`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: guestId, password }),
+      body: JSON.stringify(requestBody),
     });
   } catch {
     if (errorEl) { errorEl.textContent = 'Could not reach the server -- check your connection.'; errorEl.hidden = false; }
     return;
   }
   if (!res.ok) {
-    // A remembered password that no longer works (e.g. rotated) would
-    // otherwise fail silently on every future click -- forget it and fall
-    // back to asking for it again.
-    if (remembered) {
-      forgetSavedPassword();
+    // A remembered device token that no longer works (e.g. its 30 days ran
+    // out) would otherwise fail silently on every future click -- forget
+    // it and fall back to asking for the password again.
+    if (deviceToken) {
+      forgetDeviceToken();
       paintPasswordField();
     }
     const body = await res.json().catch(() => ({}));
@@ -373,8 +383,8 @@ async function signIn(guestId) {
     return;
   }
 
-  saveSavedPassword(password);
-  const { token, user } = await res.json();
+  const { token, user, device_token: newDeviceToken } = await res.json();
+  if (newDeviceToken) saveDeviceToken(newDeviceToken);
   state.sessionToken = token;
   state.user = user; // full row -- id, name, phone, contact_email, ...
   persist();
@@ -630,7 +640,7 @@ function main() {
         // Only the signed-in identity goes away -- the syndicate itself
         // (its name), and everything else about this device's demo state,
         // isn't this one person's to erase just by picking a different
-        // guest slot next. The remembered site password (PWD_KEY) is a
+        // guest slot next. The remembered device trust (DEVICE_KEY) is a
         // separate key entirely and is untouched either way.
         state.sessionToken = null;
         state.user = null;

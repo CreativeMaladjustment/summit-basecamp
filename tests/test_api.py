@@ -175,6 +175,51 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["user"]["id"], "usr_guest2")
 
+    def test_sign_in_with_password_returns_a_device_token(self):
+        # The device is meant to remember this instead of the raw password
+        # (see docs/backend.md "Sign-in") -- a CodeQL clear-text-storage
+        # finding on the frontend is exactly what this replaces.
+        env = make_env(SCHEMA, SEED, site_pwd="letmein")
+        status, payload = call(
+            env, "POST", "/api/auth/session", user=None,
+            body={"user_id": "usr_guest1", "password": "letmein"},
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["device_token"])
+
+    def test_sign_in_with_a_valid_device_token_needs_no_password(self):
+        env = make_env(SCHEMA, SEED, site_pwd="letmein")
+        _, payload = call(
+            env, "POST", "/api/auth/session", user=None,
+            body={"user_id": "usr_guest1", "password": "letmein"},
+        )
+        device_token = payload["device_token"]
+
+        status, payload = call(
+            env, "POST", "/api/auth/session", user=None,
+            body={"user_id": "usr_guest3", "device_token": device_token},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["user"]["id"], "usr_guest3")
+        self.assertEqual(payload["device_token"], device_token)
+
+    def test_sign_in_rejects_an_unknown_device_token(self):
+        env = make_env(SCHEMA, SEED, site_pwd="letmein")
+        status, _ = call(
+            env, "POST", "/api/auth/session", user=None,
+            body={"user_id": "usr_guest1", "device_token": "made-up-token"},
+        )
+        self.assertEqual(status, 401)
+
+    def test_sign_in_with_neither_password_nor_device_token_is_400(self):
+        env = make_env(SCHEMA, SEED, site_pwd="letmein")
+        status, payload = call(
+            env, "POST", "/api/auth/session", user=None,
+            body={"user_id": "usr_guest1"},
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("password", payload["error"])
+
     def test_a_guest_can_rename_their_own_slot(self):
         env = make_env(SCHEMA, SEED, site_pwd="letmein")
         _, payload = call(

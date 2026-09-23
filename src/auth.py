@@ -21,6 +21,10 @@ from responses import ApiError
 # sessions minted under the old one.
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 30
 
+# Same lifetime and the same "eventually locks out" property as a session
+# token above, for the same reason -- see start_device_trust.
+DEVICE_TRUST_TTL_SECONDS = 60 * 60 * 24 * 30
+
 
 def verify_site_password(env, password):
     """Raise ApiError unless ``password`` matches the SITE_PWD Worker secret.
@@ -37,6 +41,30 @@ def verify_site_password(env, password):
     # uncaught 500 instead of the same 401 any other wrong password gets.
     if not isinstance(password, str) or not hmac.compare_digest(password, expected):
         raise ApiError(401, "Wrong password")
+
+
+async def start_device_trust(env):
+    """Mint an opaque token proving this device already passed the site
+    password once, and write it into SESSIONS KV as ``device:<token>``.
+
+    This is what a device remembers instead of the password itself (see
+    ``begin_session``) -- an opaque, server-issued, independently revocable
+    credential, not the literal shared secret sitting in the browser's own
+    storage for any script on the page to read.
+    """
+    token = secrets.token_hex(32)
+    await env.SESSIONS.put("device:" + token, "1", _ttl_options(DEVICE_TRUST_TTL_SECONDS))
+    return token
+
+
+async def verify_device_token(env, device_token):
+    """Raise ApiError unless ``device_token`` is a still-valid device-trust
+    token from start_device_trust."""
+    if not isinstance(device_token, str):
+        raise ApiError(401, "Device is no longer trusted -- enter the site password again")
+    trusted = await env.SESSIONS.get("device:" + device_token)
+    if not trusted:
+        raise ApiError(401, "Device is no longer trusted -- enter the site password again")
 
 
 async def start_session(env, user_id):
