@@ -27,6 +27,7 @@ profile picture is nowhere near KV's 25 MiB per-value limit.
 | `migrations/0006_opponent_sync.sql` | Sync tracking columns (`source_ref`, `source_slug`, `match_url`) for opponents/opponent_players, and nullable `opponent_players.jersey_number` |
 | `migrations/0007_fixture_source_ref_unique.sql` | Partial unique index on `fixtures(group_id, source_ref)`, guarding `_create_fixture_from_sync` against two overlapping sync runs both creating the same fixture |
 | `migrations/0008_group_invite_codes.sql` | `groups.invite_code`, unique, backing `POST /api/groups/join` |
+| `migrations/0009_user_contact_info.sql` | `users.phone`, `users.contact_email`, backing `PATCH /api/me` |
 | `seed/dev_seed.sql` | Four members, two fixtures, a part-paid ledger, the squad and all 15 opponent dossiers -- dev only, not safe to run against production (see below); DELETE-then-INSERT throughout, so rerunning it against the same database is a full reset |
 | `seed/roster_seed.sql` | Just the real home roster, safe to run against production (`wrangler d1 execute ... --remote --file=seed/roster_seed.sql`) as a one-off; the sync job is the ongoing way this table gets updated |
 | `seed/opponents_seed.sql` | All 15 real opponent dossiers, safe to run against production -- **not** just an optional bootstrap like the other two seeds; the sync job never creates an opponent row from nothing, only updates ones this file (or an equivalent) already put there. Idempotent (`INSERT ... ON CONFLICT DO UPDATE`, never a DELETE), so rerunning it -- to add a club or fix a typo -- never wipes sync-owned `opponent_players` rows or an admin's hand-edited `form`/`shape_note` |
@@ -66,6 +67,7 @@ curl -H 'X-Dev-User: usr_ada' http://localhost:8787/api/groups
 | GET | `/api/health` | Liveness, including a D1 round trip |
 | POST | `/api/auth/session` | Exchange an OIDC token for a session (not implemented) |
 | GET | `/api/me` | The signed-in member and their notification preferences |
+| PATCH | `/api/me` | Edit your own display name, phone or fallback contact email |
 | GET | `/api/groups` | Syndicates the caller belongs to |
 | POST | `/api/groups` | Start a syndicate; the creator becomes its admin, and gets a fresh invite code |
 | POST | `/api/groups/join` | Join an existing syndicate by its invite code |
@@ -154,6 +156,22 @@ runner has a real, currently-open bug misparsing multi-statement
 [#15690](https://github.com/cloudflare/workers-sdk/issues/15690)) even
 though the same SQL runs fine locally -- worth revisiting once that's fixed
 upstream, not worth risking a broken production migration for now.
+
+## Profile
+
+`PATCH /api/me` edits the caller's own `name`, `phone`, or `contact_email`
+(migration `0009`) -- the Settings screen's "Group & profile" card. `name`
+can be changed but never cleared to empty, since it's what every other
+member sees in a member list; `phone`/`contact_email` can be cleared by
+sending `null` or an empty string. Both take any subset of the three
+fields in one call (only what's present in the body changes) and reject a
+body with none of them.
+
+`phone` and `contact_email` are their own columns, not the same as `email`
+(migration `0001`, unique, written by the Google/Apple sign-in exchange
+once that's implemented) -- a member's fallback contact for a critical
+ticket transfer isn't necessarily the same number or address their sign-in
+account uses.
 
 ## Profile pictures
 
