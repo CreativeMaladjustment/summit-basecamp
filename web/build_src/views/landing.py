@@ -41,7 +41,7 @@ def landing():
               [h("button", {"cls": "btn btn--ghost btn--block", "type": "button",
                             "data-role": "guest-login", "data-guest-id": f"usr_guest{n}"},
                  f"Guest {n}") for n in range(1, 7)]),
-            h("p", {"id": "sign-in-error", "hidden": True, "style": {
+            h("p", {"id": "sign-in-error", "role": "alert", "hidden": True, "style": {
                 "margin": "10px 0 0", "fontSize": "13px", "color": "var(--summit-sandstone)", "textAlign": "center"}})),
           h("p", {"style": {"margin": "14px 0 0", "fontSize": "13px", "color": "var(--ink-mute)", "textAlign": "center"}},
             "Six shared logins, one password. Type a name first and it replaces your Guest label for good.")),

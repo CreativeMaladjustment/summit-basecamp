@@ -32,7 +32,10 @@ def verify_site_password(env, password):
     expected = getattr(env, "SITE_PWD", None)
     if not expected:
         raise ApiError(503, "Sign-in is not configured")
-    if not hmac.compare_digest(password, expected):
+    # hmac.compare_digest raises TypeError on anything but str/bytes -- a
+    # JSON number or object in the request body would otherwise escape as an
+    # uncaught 500 instead of the same 401 any other wrong password gets.
+    if not isinstance(password, str) or not hmac.compare_digest(password, expected):
         raise ApiError(401, "Wrong password")
 
 

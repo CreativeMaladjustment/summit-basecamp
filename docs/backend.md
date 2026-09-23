@@ -181,9 +181,13 @@ password), but nothing about the endpoint ties it to that specific moment.
 
 Set `SITE_PWD` once as a secret in the `sb` GitHub environment; like
 `CF_SYNC_ADMIN_TOKEN`, deploy.yml's "Set SITE_PWD secret" step pushes it to
-the Worker on every deploy, no local `wrangler secret put` needed. Unset,
+the Worker on every deploy, no local `wrangler secret put` needed. Never set,
 `POST /api/auth/session` refuses every call with 503 rather than falling
-open.
+open. Removing the GitHub secret later doesn't just stop future pushes --
+a Worker secret persists on Cloudflare independently of GitHub, so deploy.yml's
+"Delete SITE_PWD secret if removed from GitHub" step actively deletes it from
+the Worker in that case, so revoking access really revokes it rather than
+leaving the last-deployed password silently active.
 
 There is deliberately no rate-limiting or lockout on wrong-password attempts
 beyond the constant-time comparison -- the same call this codebase already

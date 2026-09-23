@@ -137,6 +137,17 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(status, 401)
 
+    def test_sign_in_rejects_a_non_string_password(self):
+        # A JSON number reaches verify_site_password as an int; without an
+        # isinstance check it would hit hmac.compare_digest and raise
+        # TypeError, surfacing as an uncaught 500 instead of a plain 401.
+        env = make_env(SCHEMA, SEED, site_pwd="letmein")
+        status, _ = call(
+            env, "POST", "/api/auth/session", user=None,
+            body={"user_id": "usr_guest1", "password": 12345},
+        )
+        self.assertEqual(status, 401)
+
     def test_sign_in_rejects_an_unknown_guest_id(self):
         env = make_env(SCHEMA, SEED, site_pwd="letmein")
         status, _ = call(

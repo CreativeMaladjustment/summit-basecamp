@@ -446,6 +446,13 @@ function label12(hhmm) {
 // ---------- Wiring ----------
 
 function main() {
+  // A stage past Landing means signed in, in this build -- but pre-PR
+  // localStorage (the old fake "Continue with Google" flow) could have
+  // persisted 'syndicate' or 'app' with no sessionToken at all. Restoring
+  // that stage as-is would skip the password screen entirely for a
+  // returning visitor, so a non-landing stage always needs a session to
+  // come back to, same as reaching one in the first place does now.
+  if (state.stage !== 'landing' && !state.sessionToken) state.stage = 'landing';
   showStage(state.stage);
   showTab(state.tab);
   showSeason(state.season);

@@ -208,6 +208,25 @@ jobs:
         env:
           SITE_PWD: ${{ secrets.SITE_PWD }}
 
+      # The other half of the above: a Worker secret persists on Cloudflare
+      # once set, independent of GitHub, so removing the GitHub secret alone
+      # would otherwise leave the last-deployed password silently active --
+      # not the "unset means refused" behaviour the endpoint documents.
+      # `--force` skips the interactive confirmation wrangler secret delete
+      # asks for; continue-on-error covers the everything's-fine case where
+      # SITE_PWD was never set on the Worker to begin with (delete errors,
+      # nothing to clean up).
+      - name: Delete SITE_PWD secret if removed from GitHub
+        if: env.HAS_SITE_PWD == 'false'
+        continue-on-error: true
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: ${{ needs.detect.outputs.worker-dir }}
+          wranglerVersion: '4.135.0'
+          command: secret delete SITE_PWD --force
+
   web:
     name: Deploy site
     # Deliberately after the API: the site calls it, so the API should be the
