@@ -79,16 +79,45 @@ async def _get_text(url, headers=None):
     return await response.text()
 
 
+_DIAGNOSTIC_LANDMARKS = (
+    "__NEXT_DATA__",
+    "data-player-id",
+    "d3w-buttons-head-title",
+    "d3w-match-list-date",
+    "data-matchid",
+    "d3w-",
+)
+
+
 def _snippet(html, limit=1500):
     """A bounded preview of a page that fetched fine but didn't contain what
     a selector expected -- attached to the resulting SyncSourceError so it
     shows up in the GitHub Actions job summary (POST /api/admin/sync's own
     response body, see docs/backend.md) without needing a browser that can
-    actually reach nwslsoccer.com to see what changed. Whitespace collapsed
-    to keep it to roughly one line per look, not because line breaks in the
-    markup itself matter here."""
+    actually reach nwslsoccer.com to see what changed.
+
+    A real snapshot of the roster page turned out to be ~200 KB -- a plain
+    head-of-document prefix landed entirely inside the <head>'s font/CSS/JS
+    chunk preloads and never reached the <body> at all, which is useless for
+    telling "the markup moved" apart from "there's no server-rendered
+    content here anymore" (e.g. a Next.js app that now hydrates the roster
+    table client-side, which a plain fetch() can never see). So this first
+    searches the *whole* page for any substring this module's own selectors
+    still key off of -- if one turns up somewhere unexpected, the context
+    around it is worth more than an arbitrary prefix; if none turn up
+    anywhere in the page, that itself is the finding, and the prefix is
+    shown so there's still something to look at."""
+    for landmark in _DIAGNOSTIC_LANDMARKS:
+        index = html.find(landmark)
+        if index == -1:
+            continue
+        window = html[max(0, index - 200) : index + limit]
+        collapsed = re.sub(r"\s+", " ", window).strip()
+        return "found {!r} at offset {} of {}: {}".format(landmark, index, len(html), collapsed)
     collapsed = re.sub(r"\s+", " ", html).strip()
-    return collapsed[:limit] + ("..." if len(collapsed) > limit else "")
+    return "none of {!r} found anywhere in the page; head: {}".format(
+        _DIAGNOSTIC_LANDMARKS, collapsed[:limit]
+    )
 
 
 async def _get_json(url, headers=None):
