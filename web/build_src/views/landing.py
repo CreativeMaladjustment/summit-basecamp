@@ -77,6 +77,14 @@ def syndicate():
             "Find your syndicate"),
           h("p", {"style": {"margin": "10px 0 0", "fontSize": "15px", "color": "var(--ink-soft)"}},
             "Join the circle that holds the seats, or start one and invite the rest."),
+          # Shown only when the GET /api/groups membership check itself
+          # failed (network error, non-2xx) -- landing here with no
+          # syndicate listed otherwise looks identical whether someone
+          # really has none yet or the check just couldn't run, which is
+          # unanswerable from a bug report alone without this.
+          h("p", {"id": "syndicate-check-error", "role": "alert", "hidden": True, "style": {
+              "margin": "10px 0 0", "fontSize": "13px", "color": "var(--summit-sandstone)"}},
+            "Couldn't check whether you're already in a syndicate -- showing join/create instead."),
           # Populated by app.js right after sign-in from GET /api/groups --
           # a syndicate someone already belongs to (e.g. one another member
           # created) so they can jump straight back in instead of always
@@ -95,7 +103,14 @@ def syndicate():
             h("p", {"id": "join-syndicate-error", "role": "alert", "hidden": True, "style": {
                 "margin": "10px 0 0", "fontSize": "13px", "color": "var(--summit-sandstone)", "textAlign": "center"}})),
           h("button", {"cls": "btn btn--ghost btn--block", "type": "button", "style": {"marginTop": "10px"},
-                       "data-open-sheet": "sheet-new-syndicate"}, "Start a new syndicate")),
+                       "data-open-sheet": "sheet-new-syndicate"}, "Start a new syndicate"),
+          # An escape hatch for whoever lands here by mistake -- the wrong
+          # guest slot, or GET /api/groups not finding the membership they
+          # expected -- same sign-out as Settings', not a dead end forcing
+          # a real join/create just to get back to the guest picker.
+          h("button", {"cls": "btn btn--ghost btn--block", "type": "button", "style": {
+              "marginTop": "24px", "color": "var(--ink-mute)"},
+                       "data-role": "sign-out"}, "Sign out")),
     )
 
 
