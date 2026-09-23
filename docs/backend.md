@@ -173,11 +173,17 @@ write side of `_user_id_from_request`'s read. `GET /api/auth/guests` lists
 all six slots' current names, unauthenticated, so the landing screen can show
 real names to a visitor who has not signed in yet.
 
+The landing screen also remembers the password itself, client-side (a
+separate `shb.pwd` localStorage key, deliberately not cleared by "sign
+out" -- see `app.js`'s `PWD_KEY`), so a returning visitor on the same
+device skips straight to picking a guest slot. A password that no longer
+works (e.g. `SITE_PWD` rotated) is forgotten automatically on the first
+failed attempt, which brings the password field back.
+
 Each slot starts named "Guest N". `PATCH /api/me` (`src/handlers.update_me`)
-lets whoever is signed into a slot replace that with their own name, which
-then sticks for that slot going forward -- the frontend does this as part of
-signing in (a "Your name" field on the same landing-screen form as the
-password), but nothing about the endpoint ties it to that specific moment.
+lets whoever is signed into a slot replace that with their own name from
+Campfire Settings, which then sticks for that slot going forward; nothing
+about the endpoint ties it to sign-in time specifically.
 
 Set `SITE_PWD` once as a secret in the `sb` GitHub environment; like
 `CF_SYNC_ADMIN_TOKEN`, deploy.yml's "Set SITE_PWD secret" step pushes it to
@@ -382,20 +388,24 @@ wrongly-skipped one just never appears at all.
 - **Weighted payouts.** `split_equally` splits an expense evenly. Weighting by
   fixture tier and crediting members who bench a seat are still being decided;
   when they land, that one function changes.
-- **The frontend calls this API in exactly one place.** `web/index.html` is
+- **The frontend calls this API from three screens.** `web/index.html` is
   still a static build (`web/build_src/build.py`) from mock data in
   `web/build_src/data.py`, and `web/src/app.js` still mostly just toggles
-  pre-rendered DOM. Sign-in (see "Sign-in" above) is the one real exception --
-  `POST /api/auth/session`, `GET /api/auth/guests` and `PATCH /api/me` are
-  now reachable from the deployed site, using `API_BASE` (`app.js`, hardcoded
-  to the Worker's own hostname -- update it by hand the same way
-  `CF_API_BASE_URL` already needs updating on a Worker rename, see
-  `docs/deploy.md`). Every other endpoint above -- the syndicate/fixture/seat
-  data, the ledger, avatar upload -- is real and tested (`tests/test_api.py`)
-  but still not reachable from the deployed site; a signed-in session now
-  exists to authenticate those calls with, but wiring each screen up to real
-  data is still its own piece of work, not something this change set
-  attempts to close.
+  pre-rendered DOM. Sign-in, "Find your syndicate," and the Settings profile
+  card are the real exceptions -- `POST /api/auth/session`,
+  `GET /api/auth/guests`, `PATCH /api/me`, `POST /api/groups` and
+  `POST /api/groups/join` are all reachable from the deployed site, using
+  `API_BASE` (`app.js`, hardcoded to the Worker's own hostname -- update it
+  by hand the same way `CF_API_BASE_URL` already needs updating on a Worker
+  rename, see `docs/deploy.md`). Creating or joining a syndicate this way is
+  real -- it lands in D1, and the creator is genuinely its admin -- but
+  nothing else in this static build resizes to match it: Matchday, the 14er
+  Pass, the Bench and the 14ers ledger all still render the same fixed mock
+  fixtures/seats/ledger regardless of which real group `state.groupId` names.
+  Every other endpoint above -- fixtures, seats, the ledger, avatar upload --
+  is real and tested (`tests/test_api.py`) but still not reachable from the
+  deployed site; wiring each of those screens up to real data is still its
+  own piece of work, not something this change set attempts to close.
 
 ## Testing
 

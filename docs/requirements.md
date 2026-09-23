@@ -40,8 +40,8 @@ browsing beyond the Landing and "Find your syndicate" screens.
 
 | Screen | Purpose | Backed by |
 | --- | --- | --- |
-| Landing | Summit Basecamp lockup, tonight's Summit Touchline notes as teasers, six guest logins behind one shared password | `GET /api/auth/guests`, `POST /api/auth/session`, `PATCH /api/me` (all built and wired — the one screen the deployed frontend actually calls the API from) |
-| Find your syndicate | Join by invite code, or start a new one | `GET /api/groups`, `POST /api/groups`, `POST /api/groups/join` (creating and joining a syndicate are both built; the frontend still renders this screen from mock data — see Known gaps) |
+| Landing | Summit Basecamp lockup, tonight's Summit Touchline notes as teasers, six guest logins behind one shared password (remembered on the device after the first time) | `GET /api/auth/guests`, `POST /api/auth/session`, `PATCH /api/me` (all built and wired) |
+| Find your syndicate | Join by invite code, or start a new one | `POST /api/groups`, `POST /api/groups/join` (both wired to the real API — a syndicate created or joined here is real, but every *other* screen still shows fixed mock fixtures/seats/ledger regardless of it — see Known gaps) |
 | Matchday | Next Match hero, Summit Touchline carousel, bench note threads, balance line | `GET /api/groups/{id}/fixtures`, `GET /api/groups/{id}/ledger`, `GET /api/bios/today` |
 | The 14er Pass | Every home fixture in the season, filtered by All / My Matches / On the Bench | `GET /api/groups/{id}/fixtures`, `GET /api/fixtures/{id}/seats` |
 | The Bench | Seats waiting for a sub, plus anything listed on an external resale exchange | `GET /api/groups/{id}/listings` |
@@ -78,7 +78,7 @@ An expense (`POST /api/groups/{id}/expenses`) writes one `transactions` row per 
 
 - No push notification delivery (only the underlying "who needs a nudge" logic).
 - No integration with any external ticketing platform (SeatGeek, Ticketmaster, the club's own app) — "List Outside the 14ers" only tracks that a seat is listed; the admin or seat holder handles the actual transfer or sale themselves, outside SquadSeats.
-- Frontend and backend are integrated on exactly one screen so far (Landing, sign-in). Every other screen ships with mock data compiled in at build time (`web/build_src/data.py`), even though each has a live endpoint behind it (fixtures, ledger, listings, bios, roster, opponents). Wiring those up to the live API (build-time fetch for public data, runtime session-authenticated fetch for per-member data like balances and seat assignments) is the next major milestone.
+- Frontend and backend are integrated on three screens so far: Landing (sign-in), "Find your syndicate" (create/join), and the Settings profile card (name/phone/email). Every other screen ships with mock data compiled in at build time (`web/build_src/data.py`), even though each has a live endpoint behind it (fixtures, ledger, listings, bios, roster, opponents) and a real, authenticated `groupId` now exists to scope those calls to once they're wired. Wiring those up to the live API (build-time fetch for public data, runtime session-authenticated fetch for per-member data like balances and seat assignments) is the next major milestone.
 
 ## Non-functional requirements
 
@@ -111,7 +111,7 @@ Tap targets ≥ 44px; toggles are `role="switch"` with `aria-checked`; the Summi
 
 ## Open questions & near-term scope
 
-- **Frontend/backend wiring (feature next)** — no target date set; this is the largest remaining piece and touches every screen above except Landing (sign-in is wired).
+- **Frontend/backend wiring (feature next)** — no target date set; this is the largest remaining piece and touches every screen above except Landing, "Find your syndicate," and the Settings profile card, which are wired.
 - **Push delivery** — the cron logic exists; the send mechanism (web push? provider?) is not chosen.
 - **Weighted expense splits** — the formula for tier-weighted shares and bench-release credit is "still being decided" per `docs/backend.md`; `split_equally` is the only implementation today.
 - **Roster/scouting data** — `GET /api/roster` and `GET /api/opponents` now back Home Team and Visitors with real tables (`roster_players`, `opponents`, `opponent_players`). The Denver Summit squad (`roster_players`) is the real 2026 roster as of 2026-09-21, kept current by the sync job below. `opponents` covers all 15 other NWSL clubs with real facts (real dates, real venue, the real result of the most recent meeting) as of 2026-09-22 -- see `seed/opponents_seed.sql`; no invented form/shape/"danger player" commentary, since none of that is published anywhere to verify. `opponent_players` has no rows seeded by hand (unlike the home roster, no local snapshot was transcribed for any opponent) -- it is populated entirely by `src/sync.py`'s `_sync_opponent_rosters`, using roster-page URLs the user verified directly for all 15 clubs, so real opponent rosters land the first time that job runs successfully against the deployed Worker rather than needing a follow-up transcription pass.
