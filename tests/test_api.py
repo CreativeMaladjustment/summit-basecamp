@@ -336,6 +336,10 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual([g["id"] for g in payload["groups"]], ["grp_summit"])
         self.assertEqual(payload["groups"][0]["role"], "admin")
+        # Present so a client can skip straight into a syndicate someone is
+        # already a member of instead of always landing on create/join --
+        # same seat_label create_group and update_member accept elsewhere.
+        self.assertIn("seat_label", payload["groups"][0])
 
     def test_creating_a_syndicate_makes_the_creator_its_admin(self):
         status, payload = call(

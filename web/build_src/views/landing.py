@@ -77,6 +77,16 @@ def syndicate():
             "Find your syndicate"),
           h("p", {"style": {"margin": "10px 0 0", "fontSize": "15px", "color": "var(--ink-soft)"}},
             "Join the circle that holds the seats, or start one and invite the rest."),
+          # Populated by app.js right after sign-in from GET /api/groups --
+          # a syndicate someone already belongs to (e.g. one another member
+          # created) so they can jump straight back in instead of always
+          # being offered create/join again. Hidden here; app.js only shows
+          # it (and skips this whole screen entirely) when that call finds
+          # one or more real memberships.
+          h("div", {"id": "my-syndicates", "hidden": True, "style": {"marginTop": "20px"}},
+            h("p", {"cls": "field__label"}, "Your syndicates"),
+            h("div", {"id": "my-syndicate-list", "style": {
+                "marginTop": "8px", "display": "flex", "flexDirection": "column", "gap": "8px"}})),
           h("div", {"cls": "card", "style": {"marginTop": "20px"}},
             h("label", {"cls": "field__label", "for": "invite"}, "Invite code"),
             h("input", {"cls": "input", "id": "invite", "placeholder": "e.g. NORTH-114"}),

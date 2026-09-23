@@ -29,6 +29,15 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
+  // Only the app shell itself is this service worker's job -- cross-origin
+  // API calls (summit-basecamp-api.shb-fe7.workers.dev) must never be
+  // shadowed through here. Left unscoped, every GET, auth'd API responses
+  // included, would get sent through this fetch/cache dance too: cached
+  // into this origin's Cache Storage (where any script on the page can
+  // read it back, unlike an ordinary in-memory fetch response) and
+  // potentially replayed stale from here if the real request ever failed,
+  // instead of the caller just seeing that failure.
+  if (new URL(e.request.url).origin !== self.location.origin) return;
   // Network-first: always try the network so a new deploy is visible on the
   // very next load, and only serve the cached shell when the network is
   // unreachable (offline). Stale-while-revalidate used to answer from

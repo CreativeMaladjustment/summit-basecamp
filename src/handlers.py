@@ -157,7 +157,7 @@ async def list_groups(request, env, params):
     groups = await query(
         env,
         """
-        SELECT g.*, m.role, m.default_seat_number
+        SELECT g.*, m.role, m.default_seat_number, m.seat_label
         FROM groups g
         JOIN group_members m ON m.group_id = g.id
         WHERE m.user_id = ?
