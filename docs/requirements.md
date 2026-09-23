@@ -97,7 +97,7 @@ Tap targets ≥ 44px; toggles are `role="switch"` with `aria-checked`; the Summi
 
 ### Deployment
 
-- Deploys run through `.github/workflows/deploy.yml` on push to `main`, using the GitHub environment **"shb"** (holds `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`). The Worker deploys to Cloudflare Workers, the PWA to Cloudflare Pages, each independently detected and skipped if absent.
+- Deploys run through `.github/workflows/deploy.yml` on push to `main`, using the GitHub environment **"sb"** (holds `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`). The Worker deploys to Cloudflare Workers, the PWA to Cloudflare Pages, each independently detected and skipped if absent.
 - All code changes land via pull request; nothing is pushed directly to `main`, and PRs require passing SAST/Terraform/DAST checks.
 - Resource provisioning (D1, KV) is a separate manual workflow, `provision-cloudflare.yml`.
 

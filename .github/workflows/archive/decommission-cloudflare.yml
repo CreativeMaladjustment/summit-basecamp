@@ -45,7 +45,7 @@ jobs:
   decommission:
     name: Delete the old resource
     runs-on: ubuntu-latest
-    environment: shb
+    environment: sb
     steps:
       - name: Delete the old Worker
         if: inputs.resource == 'worker'

@@ -231,7 +231,7 @@ right after the code or data that feeds it changes rather than waiting up
 to a week for the next cron tick. The admin endpoint is authenticated by a
 shared-secret bearer token (`SYNC_ADMIN_TOKEN` on the Worker), not a
 signed-in user. Set it once as the `CF_SYNC_ADMIN_TOKEN` secret in the
-`shb` GitHub environment -- deploy.yml's "Set SYNC_ADMIN_TOKEN secret" step
+`sb` GitHub environment -- deploy.yml's "Set SYNC_ADMIN_TOKEN secret" step
 pushes that value to the Worker on every deploy, so there is no
 `wrangler secret put` to run by hand.
 
