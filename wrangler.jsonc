@@ -26,7 +26,7 @@
   // SITE_PWD is the one shared password gating all six guest slots on the
   // landing screen (see src/auth.verify_site_password and
   // src/handlers.begin_session) -- set it once as the SITE_PWD secret in
-  // the "shb" GitHub environment.
+  // the "sb" GitHub environment.
   "vars": {
     "ENVIRONMENT": "production"
   },

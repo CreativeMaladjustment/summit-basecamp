@@ -179,7 +179,7 @@ then sticks for that slot going forward -- the frontend does this as part of
 signing in (a "Your name" field on the same landing-screen form as the
 password), but nothing about the endpoint ties it to that specific moment.
 
-Set `SITE_PWD` once as a secret in the `shb` GitHub environment; like
+Set `SITE_PWD` once as a secret in the `sb` GitHub environment; like
 `CF_SYNC_ADMIN_TOKEN`, deploy.yml's "Set SITE_PWD secret" step pushes it to
 the Worker on every deploy, no local `wrangler secret put` needed. Unset,
 `POST /api/auth/session` refuses every call with 503 rather than falling
