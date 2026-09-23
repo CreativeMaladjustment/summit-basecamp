@@ -391,6 +391,11 @@ async function paintRealSyndicateDetail() {
     // than blocking the rest of this real data (group/members) from showing.
   }
 
+  const inviteCodeEl = document.getElementById('invite-code-display');
+  if (inviteCodeEl) inviteCodeEl.textContent = group.invite_code || '—';
+  const rotateBtn = document.getElementById('rotate-invite-code');
+  if (rotateBtn) rotateBtn.hidden = members.find((m) => m.id === state.user?.id)?.role !== 'admin';
+
   const holdsEl = document.getElementById('syndicate-holds');
   if (holdsEl) {
     const seatBits = [];
@@ -1240,6 +1245,20 @@ async function postBenchNoteReply(noteId, body) {
   }
 }
 
+async function rotateInviteCode() {
+  const res = await fetch(`${API_BASE}/api/groups/${state.groupId}/invite-code/rotate`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${state.sessionToken}` },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'Could not generate a new code.');
+  }
+  const { group } = await res.json();
+  const codeEl = document.getElementById('invite-code-display');
+  if (codeEl) codeEl.textContent = group.invite_code;
+}
+
 async function joinSyndicate(code) {
   const errorEl = document.getElementById('join-syndicate-error');
   let res;
@@ -1620,6 +1639,28 @@ function main() {
         listSeatForResale(callASubTarget.allocationId, Math.round(askDollars * 100))
           .then(() => closeSheet())
           .catch((err) => { if (errorEl) { errorEl.textContent = err.message; errorEl.hidden = false; } })
+          .finally(() => { el.disabled = false; });
+        return;
+      }
+      case 'copy-invite-code': {
+        const codeEl = document.getElementById('invite-code-display');
+        const statusEl = document.getElementById('invite-code-status');
+        const code = codeEl?.textContent?.trim();
+        if (!code || code === '—' || code === 'Loading…') return;
+        const done = () => { if (statusEl) { statusEl.textContent = 'Copied.'; statusEl.hidden = false; } };
+        const fail = () => { if (statusEl) { statusEl.textContent = 'Could not copy automatically -- select and copy it by hand.'; statusEl.hidden = false; } };
+        if (navigator.clipboard?.writeText) navigator.clipboard.writeText(code).then(done).catch(fail);
+        else fail();
+        return;
+      }
+      case 'rotate-invite-code': {
+        if (el.disabled) return;
+        const statusEl = document.getElementById('invite-code-status');
+        if (statusEl) statusEl.hidden = true;
+        el.disabled = true;
+        rotateInviteCode()
+          .then(() => { if (statusEl) { statusEl.textContent = 'New code generated -- the old one no longer works.'; statusEl.hidden = false; } })
+          .catch((err) => { if (statusEl) { statusEl.textContent = err.message; statusEl.hidden = false; } })
           .finally(() => { el.disabled = false; });
         return;
       }

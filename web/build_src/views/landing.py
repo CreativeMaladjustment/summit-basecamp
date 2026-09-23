@@ -97,7 +97,7 @@ def syndicate():
                 "marginTop": "8px", "display": "flex", "flexDirection": "column", "gap": "8px"}})),
           h("div", {"cls": "card", "style": {"marginTop": "20px"}},
             h("label", {"cls": "field__label", "for": "invite"}, "Invite code"),
-            h("input", {"cls": "input", "id": "invite", "placeholder": "e.g. NORTH-114"}),
+            h("input", {"cls": "input", "id": "invite", "placeholder": "e.g. amber-canyon"}),
             h("button", {"cls": "btn btn--primary btn--block", "type": "button", "style": {"marginTop": "10px"},
                          "data-role": "join-syndicate"}, "Join with code"),
             h("p", {"id": "join-syndicate-error", "role": "alert", "hidden": True, "style": {

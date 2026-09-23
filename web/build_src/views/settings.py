@@ -30,7 +30,7 @@ def render():
           "What reaches you, when, and on which device."),
         device_banners(),
         h("div", {"cls": "grid-auto", "style": {"alignItems": "start"}},
-          matchday_section(), notes_section(), profile_section(), preview_section()),
+          matchday_section(), notes_section(), profile_section(), invite_section(), preview_section()),
     )
 
 
@@ -140,6 +140,37 @@ def profile_section():
         h("label", {"cls": "field"}, h("span", {"cls": "field__label"}, "Email"),
           h("input", {"cls": "input", "type": "email", "placeholder": "you@example.com", "id": "email"})),
         h("button", {"cls": "btn btn--ghost btn--block", "type": "button", "data-role": "sign-out"}, "Sign out"),
+    )
+
+
+def invite_section():
+    """The code itself and the copy button are useful to any member; only an
+    admin can actually generate a new one (rotate_invite_code is admin-only
+    server-side), so that button starts hidden and app.js's
+    paintRealSyndicateDetail() reveals it once it knows this device's role in
+    the real syndicate. The code text starts as a placeholder for the same
+    reason the rest of this app does -- it's real, per-syndicate data that
+    doesn't exist until the API answers."""
+    return h(
+        "section", {"cls": "card"},
+        h("h2", {"cls": "card__title"}, "Invite your circle"),
+        h("p", {"style": {"margin": "0 0 12px", "fontSize": "13px", "color": "var(--ink-mute)"}},
+          "Share this code so someone can join on Find-your-syndicate. Anyone who knows the "
+          "site password and this code can get in -- treat it like a shared key, not a public link."),
+        h("div", {"cls": "card card--sunk", "style": {
+            "display": "flex", "alignItems": "center", "justifyContent": "space-between",
+            "gap": "10px", "marginBottom": "10px"}},
+          h("span", {"id": "invite-code-display", "style": {
+              "fontFamily": "var(--font-mono)", "fontWeight": "700", "fontSize": "18px",
+              "letterSpacing": ".02em"}}, "Loading…"),
+          h("button", {"cls": "btn btn--ghost", "type": "button", "data-role": "copy-invite-code"}, "Copy")),
+        h("p", {"id": "invite-code-status", "role": "status", "hidden": True, "style": {
+            "margin": "0 0 10px", "fontSize": "13px", "color": "var(--summit-green)"}}),
+        h("button", {"cls": "btn btn--ghost btn--block", "type": "button",
+                     "id": "rotate-invite-code", "data-role": "rotate-invite-code", "hidden": True},
+          "Generate a new code"),
+        h("p", {"style": {"margin": "8px 0 0", "fontSize": "12px", "color": "var(--ink-mute)"}},
+          "Generating a new code immediately stops the old one from working."),
     )
 
 
