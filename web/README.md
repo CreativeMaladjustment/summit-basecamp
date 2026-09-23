@@ -53,7 +53,7 @@ expand target that's referenced actually exists, and so on.
 | Matchday | Next Match hero, Summit Touchline carousel, bench note threads, balance line |
 | The 14er Pass | Every home fixture in the season, filtered by All / My Matches / On the Bench |
 | The Bench | Seats waiting for a sub and anything listed on an external exchange |
-| The 14ers | Package cost, weighted tier split, simplified debts, Settle Up, season history |
+| The 14ers | Package cost, simplified debts, Settle Up, season history |
 | Home Team | Full squad with position filters, stats and scouting notes (a "Peak Tifo" visual grid) |
 | Visitors | The visiting club's dressing room: dossiers, halftime reads, danger flags |
 | Campfire Settings | Push permissions, matchday alerts, Summit Touchline notes mix, profile |
@@ -103,16 +103,26 @@ library's `html` module — the same reasoning as the backend's own
 Everything the app shows comes from `build_src/data.py`, baked into
 `index.html` at build time. `src/app.js` holds only the runtime state that
 can change after a click — the current tab, which seats are claimed, sheet
-contents typed in, dropped photos — persisted to `localStorage`. Three
+contents typed in, dropped photos — persisted to `localStorage`. Several
 screens are real API integrations rather than just local state: sign-in
 (`POST /api/auth/session`, `GET /api/auth/guests` — see `docs/backend.md`
 "Sign-in"), "Find your syndicate" (`POST /api/groups`,
-`POST /api/groups/join` — a syndicate created or joined there is a real
-row in D1), and the Settings profile card's name/phone/email fields, each
-saving independently via `PATCH /api/me`. Every other screen still renders
-from mock data regardless of which real syndicate `state.groupId` names.
-Player names, jersey numbers, stats and fixture dates are invented placeholders —
-swap in the real roster and the published fixture list when they exist, and
+`POST /api/groups/join`, plus `GET /api/groups` to skip straight into a
+syndicate the signed-in guest slot already belongs to — a syndicate
+created, joined or landed in there is a real row in D1), the Settings
+profile card's name/phone/email fields (each saving independently via
+`PATCH /api/me`), and the header's "N seats · Sec/Row" readout plus The
+14ers ledger card, repainted with real numbers from `GET /api/groups/{id}`
+and `.../ledger` by `paintRealSyndicateDetail()` once a real syndicate
+exists — real package price, real seat/member counts, and real per-member
+balances (`net_balances`/`settle_plan`, evenly split — the mock's
+weighted-by-tier breakdown is gone from the real view since no real
+fixture has a tier yet). Matchday, The 14er Pass and The Bench still
+render mock fixtures/seats regardless of which real syndicate
+`state.groupId` names; bench note threads have no backend at all
+(`addBenchNoteCard` is client-only, nothing persists). Player names,
+jersey numbers, stats and fixture dates are invented placeholders — swap
+in the real roster and the published fixture list when they exist, and
 point the club bio links at real URLs.
 
 Wiring this to the Cloudflare Workers + D1 backend means replacing

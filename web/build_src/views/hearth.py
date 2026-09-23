@@ -46,11 +46,11 @@ def balance_line(cents, year):
         f"The circle holds your {money(cents)}." if cents > 0 else f"You hold the tab ({money(abs(cents))})."
     )
     return h(
-        "div", {"cls": "card", "style": {"border": "1px solid var(--summit-sunshine)", "background": "rgba(246,190,0,.08)"}},
-        h("p", {"style": {"margin": "0", "fontFamily": "var(--font-display)", "fontWeight": "700", "fontSize": "18px"}}, text),
+        "div", {"id": "ledger-balance-line", "cls": "card", "style": {"border": "1px solid var(--summit-sunshine)", "background": "rgba(246,190,0,.08)"}},
+        h("p", {"data-role": "balance-text", "style": {"margin": "0", "fontFamily": "var(--font-display)", "fontWeight": "700", "fontSize": "18px"}}, text),
         h("button", {"cls": "btn btn--primary", "type": "button", "style": {"marginTop": "12px"},
                      "data-open-sheet": "sheet-settleup", "data-settle-amount": str(abs(cents)),
-                     "data-settle-owed": "true" if cents > 0 else "false"}, "Settle Up") if cents != 0 else None,
+                     "data-settle-owed": "true" if cents > 0 else "false", "hidden": cents == 0}, "Settle Up"),
     )
 
 
@@ -77,14 +77,14 @@ def package_card(ledger, year):
     syn = SYNDICATES[0]
     return h(
         "article", {"cls": "card"},
-        h("h2", {"cls": "card__title"}, f"{year} package"),
-        h("p", {"style": {"margin": "0", "fontFamily": "var(--font-display)", "fontWeight": "800", "fontSize": "28px"}},
+        h("h2", {"cls": "card__title", "id": "ledger-package-year"}, f"{year} package"),
+        h("p", {"id": "ledger-package-price", "style": {"margin": "0", "fontFamily": "var(--font-display)", "fontWeight": "800", "fontSize": "28px"}},
           money(ledger["package_cents"])),
-        h("p", {"style": {"margin": "2px 0 14px", "fontSize": "13px", "color": "var(--ink-mute)"}},
+        h("p", {"id": "ledger-package-circle", "style": {"margin": "2px 0 14px", "fontSize": "13px", "color": "var(--ink-mute)"}},
           f'{len(syn["seats"])} seats · {len(syn["member_ids"])} in the circle'),
         h("p", {"cls": "eyebrow"}, "Weighted by tier"),
-        h("div", {"style": {"marginTop": "8px"}}, bars) if bars else
-        h("p", {"style": {"fontSize": "13px", "color": "var(--ink-mute)"}}, "No fixtures this season."),
+        h("div", {"id": "ledger-package-tiers", "style": {"marginTop": "8px"}}, bars) if bars else
+        h("p", {"id": "ledger-package-tiers", "style": {"fontSize": "13px", "color": "var(--ink-mute)"}}, "No fixtures this season."),
     )
 
 
@@ -104,10 +104,10 @@ def debts_card(ledger):
     return h(
         "article", {"cls": "card"},
         h("h2", {"cls": "card__title"}, "Who holds the tab"),
-        h("div", None, rows) if debts else
-        h("p", {"style": {"margin": "0", "fontSize": "14px", "color": "var(--ink-mute)"}}, "All square."),
+        h("div", {"id": "ledger-debts-rows"}, rows) if debts else
+        h("p", {"id": "ledger-debts-rows", "style": {"margin": "0", "fontSize": "14px", "color": "var(--ink-mute)"}}, "All square."),
         h("p", {"cls": "eyebrow", "style": {"marginTop": "14px"}}, "Everyone else"),
-        h("div", {"style": {"marginTop": "8px"}},
+        h("div", {"id": "ledger-squared-list", "style": {"marginTop": "8px"}},
           [h("p", {"style": {"margin": "0 0 6px", "fontSize": "14px", "color": "var(--ink-mute)"}},
              f'{MEMBERS[m]["name"]} is all square.') for m in squared]),
     )
@@ -128,7 +128,8 @@ def history_card():
                 f'{len(l["debts"])} open transfer{"s" if len(l["debts"]) > 1 else ""}' if l["debts"] else "Settled")),
             h("span", {"style": {"fontFamily": "var(--font-mono)", "fontSize": "14px"}}, money(l["package_cents"])),
         ))
-    return h("article", {"cls": "card"}, h("h2", {"cls": "card__title"}, "Season history"), rows)
+    return h("article", {"cls": "card"}, h("h2", {"cls": "card__title"}, "Season history"),
+             h("div", {"id": "ledger-history-rows"}, rows))
 
 
 def settle_sheet():
