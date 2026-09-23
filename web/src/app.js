@@ -332,6 +332,7 @@ function settleIntoSyndicate(group, mySeatLabel = null) {
   showTab('matchday');
   paintRealSyndicateDetail();
   paintRealFixtures();
+  paintTouchlineBio();
 }
 
 function balanceLineText(cents) {
@@ -632,6 +633,82 @@ function seatLineEl(seat, onDark) {
   meta.append(nameP, seatP);
   wrap.appendChild(meta);
   return wrap;
+}
+
+// Touchline Scout's first carousel slide -- today's scouted opponent from
+// GET /api/bios/today (the real player_bios table), account-wide rather
+// than tied to any one syndicate. image_path names a file meant to be
+// committed under web/assets/images/players/ and served by Pages from this
+// same origin (see handlers.bio_of_the_day's own comment) -- none exist
+// yet, so it's layered as a background image over the same diagonal-stripe
+// placeholder swatch used elsewhere for a missing photo: a failed image
+// layer just leaves that placeholder showing through, no onerror needed.
+async function paintTouchlineBio() {
+  const slot = document.getElementById('touchline-bio-slot');
+  if (!slot || !state.sessionToken) return;
+
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/api/bios/today`, { headers: { Authorization: `Bearer ${state.sessionToken}` } });
+  } catch {
+    return; // offline -- leave the loading placeholder as-is
+  }
+
+  if (res.status === 404) {
+    slot.innerHTML = '';
+    const eyebrow = document.createElement('p');
+    eyebrow.className = 'eyebrow';
+    eyebrow.textContent = 'Touchline Scout';
+    const empty = document.createElement('p');
+    empty.style.cssText = 'margin:8px 0 0;font-size:14px;color:var(--ink-mute)';
+    empty.textContent = 'No scouting note today.';
+    slot.append(eyebrow, empty);
+    return;
+  }
+  if (!res.ok) return; // some other failure -- leave the loading placeholder as-is
+
+  const { bio } = await res.json();
+  slot.innerHTML = '';
+
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:12px';
+
+  const photo = document.createElement('div');
+  photo.setAttribute('aria-hidden', 'true');
+  photo.style.cssText = 'width:64px;height:64px;border-radius:12px;flex:none;background-size:cover;background-position:center';
+  // JSON.stringify quotes/escapes image_path safely for a CSS url() -- a
+  // raw template-string interpolation here could break out of the url()
+  // if the path ever contained a quote.
+  photo.style.backgroundImage = `url(${JSON.stringify(bio.image_path)}), repeating-linear-gradient(135deg, var(--surface-sunk) 0 8px, var(--hairline) 8px 16px)`;
+
+  const info = document.createElement('div');
+  const eyebrow = document.createElement('p');
+  eyebrow.className = 'eyebrow';
+  eyebrow.textContent = 'Touchline Scout';
+  const nameLine = document.createElement('p');
+  nameLine.style.cssText = 'margin:4px 0 0;display:flex;align-items:center;gap:8px';
+  if (bio.jersey_number) {
+    const jerseyBadge = document.createElement('span');
+    jerseyBadge.className = 'badge badge--gold';
+    jerseyBadge.textContent = `#${bio.jersey_number}`;
+    nameLine.appendChild(jerseyBadge);
+  }
+  const name = document.createElement('strong');
+  name.style.cssText = 'font-family:var(--font-display);font-size:16px';
+  name.textContent = bio.player_name;
+  nameLine.appendChild(name);
+  const posLine = document.createElement('p');
+  posLine.style.cssText = 'margin:2px 0 0;font-size:12px;color:var(--ink-mute)';
+  posLine.textContent = [bio.position, bio.team].filter(Boolean).join(' · ');
+  info.append(eyebrow, nameLine, posLine);
+  if (bio.bio_markdown) {
+    const body = document.createElement('p');
+    body.style.cssText = 'margin:8px 0 0;font-size:14px;color:var(--ink-soft)';
+    body.textContent = bio.bio_markdown;
+    info.appendChild(body);
+  }
+  row.append(photo, info);
+  slot.appendChild(row);
 }
 
 async function paintRealFixtures() {
@@ -1482,6 +1559,7 @@ function main() {
   hydrateProfile();
   paintRealSyndicateDetail();
   paintRealFixtures();
+  paintTouchlineBio();
 
   document.querySelectorAll('.switch[data-pref]').forEach(wireToggle);
   document.getElementById('checkin-time')?.addEventListener('change', paintPreview);
