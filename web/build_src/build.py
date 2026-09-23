@@ -32,46 +32,15 @@ import settings
 import landing
 
 
-def next_fixture(fixtures):
-    now = "2026-09-20T15:00:00"
-    upcoming = [f for f in fixtures if f["kickoff"] > now]
-    upcoming.sort(key=lambda f: f["kickoff"])
-    return upcoming[0] if upcoming else (fixtures[-1] if fixtures else None)
-
-
-def open_seats(fixtures):
-    now = "2026-09-20T15:00:00"
-    out = []
-    for f in fixtures:
-        if f["kickoff"] < now:
-            continue
-        for s in f["seats"]:
-            if s["status"] in ("bench", "listed"):
-                out.append((f, s))
-    return out
-
-
 def build():
-    fixtures_2026 = sorted((f for f in D.FIXTURES if f["season"] == 2026), key=lambda f: f["kickoff"])
-    # Matches refreshBenchCount() in app.js, which counts every visible Bench
-    # card (waiting *and* listed), so the pre-rendered badge doesn't jump the
-    # moment app.js repaints it.
-    bench_count = len(open_seats(fixtures_2026))
-    notes_by_id = {n["id"]: n for n in D.BENCH_NOTES}
-    ledger_2026 = D.LEDGER[2026]
-    my_balance = ledger_2026["paid"].get(D.ME, 0) - ledger_2026["owed"].get(D.ME, 0)
-    nxt = next_fixture(fixtures_2026)
+    # Bench/Pitch/Matchday's real fixture and seat content doesn't exist at
+    # build time -- it's a specific syndicate's real schedule, fetched and
+    # rendered at runtime by web/src/app.js's paintRealFixtures(). The bench
+    # badge in the header starts at 0 for the same reason and is repainted
+    # alongside it, rather than trying to precompute a real count here.
+    bench_count = 0
 
-    # One Call a Sub sheet set per fixture holding a seat of yours. Every
-    # "Call a Sub" button (pitch.py, matchday.py) only ever targets your
-    # first held seat in a fixture, so sheets are generated to match —
-    # once per fixture, not once per held seat (a fixture with two seats
-    # of yours would otherwise get a duplicate, id-colliding sheet set).
-    fixtures_held_by_me = [f for f in D.FIXTURES if any(s["holder"] == D.ME for s in f["seats"])]
-    sheets = []
-    for f in fixtures_held_by_me:
-        _, nodes = callasub.build(f)
-        sheets.extend(nodes)
+    sheets = callasub.build()
     sheets.append(hearth.settle_sheet())
     sheets.append(landing.new_syndicate_sheet())
 
@@ -79,9 +48,9 @@ def build():
         "div", {"id": "stage-app", "hidden": True},
         layout.header(bench_count),
         h("main", None,
-          matchday.render(nxt, D.BENCH_NOTES, my_balance),
-          pitch.render(fixtures_2026),
-          bench.render(fixtures_2026, notes_by_id),
+          matchday.render(),
+          pitch.render(),
+          bench.render(),
           hearth.render(),
           hometeam.render(),
           visitors.render(),

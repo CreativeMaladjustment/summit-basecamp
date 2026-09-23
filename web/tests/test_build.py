@@ -70,13 +70,10 @@ class ViewsRenderCleanly(unittest.TestCase):
     version hit once (a literal 'null' rendered under every player card)."""
 
     def setUp(self):
-        self.fixtures = [f for f in D.FIXTURES if f["season"] == 2026]
-        self.notes_by_id = {n["id"]: n for n in D.BENCH_NOTES}
-        nxt = build_mod.next_fixture(self.fixtures)
         self.pieces = {
-            "matchday": matchday.render(nxt, D.BENCH_NOTES, 4500),
-            "pitch": pitch.render(self.fixtures),
-            "bench": bench.render(self.fixtures, self.notes_by_id),
+            "matchday": matchday.render(),
+            "pitch": pitch.render(),
+            "bench": bench.render(),
             "hearth": hearth.render(),
             "hometeam": hometeam.render(),
             "visitors": visitors.render(),
@@ -92,7 +89,7 @@ class ViewsRenderCleanly(unittest.TestCase):
 
     def test_every_view_has_expected_heading(self):
         expectations = {
-            "matchday": "Summit vs",
+            "matchday": "Loading your next match",
             "pitch": "The 14er Pass",
             "bench": "The Bench",
             "hearth": "The 14ers",

@@ -79,7 +79,8 @@ switch.
 index.html                generated — do not hand-edit, run build.py instead
 manifest.webmanifest      PWA manifest
 sw.js                     app-shell cache
-src/app.js                the whole runtime: show/hide, sheets, forms, persistence
+src/app.js                the whole runtime: show/hide, sheets, forms, persistence,
+                          and real per-syndicate rendering (fixtures, seats, ledger)
 src/styles/                tokens, base, components
 build_src/build.py        orchestrator — assembles every view into index.html
 build_src/markup.py       the `h(tag, attrs, *children)` HTML builder (no deps)
@@ -88,8 +89,7 @@ build_src/fmt.py          money/date formatting, ported 1:1 from the old JS
 build_src/icons.py        inline SVG icon paths
 build_src/components.py   avatar, badge, chip, toggle, photo slot, bio links
 build_src/layout.py       <head>, header/nav, the shared sheet chrome
-build_src/callasub.py     the three-pathway Call a Sub sheet set
-build_src/seats.py        held/released/claimable seat state, pre-rendered both ways
+build_src/callasub.py     the one reusable Call a Sub sheet set, repainted per seat by app.js
 build_src/views/          one module per screen (matchday, pitch, bench, ...)
 tests/test_build.py       renders every view and the assembled page, no browser
 ```
@@ -100,36 +100,32 @@ library's `html` module — the same reasoning as the backend's own
 
 ## Data and the backend
 
-Everything the app shows comes from `build_src/data.py`, baked into
-`index.html` at build time. `src/app.js` holds only the runtime state that
-can change after a click — the current tab, which seats are claimed, sheet
-contents typed in, dropped photos — persisted to `localStorage`. Several
-screens are real API integrations rather than just local state: sign-in
-(`POST /api/auth/session`, `GET /api/auth/guests` — see `docs/backend.md`
-"Sign-in"), "Find your syndicate" (`POST /api/groups`,
+Most of what the app shows now comes from the live API, not
+`build_src/data.py`. `src/app.js` holds the runtime state that can change
+after a click — the current tab, sheet contents typed in, dropped photos —
+persisted to `localStorage`, plus (the bigger piece) it builds a signed-in
+member's real syndicate straight from the API at runtime, since which
+fixtures exist and who holds which seat isn't known until a real syndicate
+is: sign-in (`POST /api/auth/session`, `GET /api/auth/guests` — see
+`docs/backend.md` "Sign-in"), "Find your syndicate" (`POST /api/groups`,
 `POST /api/groups/join`, plus `GET /api/groups` to skip straight into a
-syndicate the signed-in guest slot already belongs to — a syndicate
-created, joined or landed in there is a real row in D1), the Settings
-profile card's name/phone/email fields (each saving independently via
-`PATCH /api/me`), and the header's "N seats · Sec/Row" readout plus The
-14ers ledger card, repainted with real numbers from `GET /api/groups/{id}`
-and `.../ledger` by `paintRealSyndicateDetail()` once a real syndicate
-exists — real package price, real seat/member counts, and real per-member
-balances (`net_balances`/`settle_plan`, evenly split — the mock's
-weighted-by-tier breakdown is gone from the real view since no real
-fixture has a tier yet). Matchday, The 14er Pass and The Bench still
-render mock fixtures/seats regardless of which real syndicate
-`state.groupId` names; bench note threads have no backend at all
-(`addBenchNoteCard` is client-only, nothing persists). Player names,
-jersey numbers, stats and fixture dates are invented placeholders — swap
-in the real roster and the published fixture list when they exist, and
-point the club bio links at real URLs.
+syndicate the signed-in guest slot already belongs to), the Settings
+profile card's name/phone/email fields (`PATCH /api/me`), the header's
+"N seats · Sec/Row" readout and The 14ers ledger card
+(`paintRealSyndicateDetail()` — real package price, real seat/member
+counts, real per-member balances via `net_balances`/`settle_plan`, evenly
+split, no tier weighting), and Matchday/The 14er Pass/The Bench
+(`paintRealFixtures()` — real fixtures and seats, claim/release/gift/
+resale-list wired to `PATCH /api/seats/{id}`, real bench notes and replies
+via `GET/POST .../bench-notes`). Only Home Team and Visitors still render
+straight from `build_src/data.py`'s placeholder roster/opponent content —
+player names, jersey numbers, stats there are invented; swap in the real
+roster when it's wired and point the club bio links at real URLs.
 
-Wiring this to the Cloudflare Workers + D1 backend means replacing
-`build_src/data.py`'s constants with API calls made at build time (or,
-for anything that has to be live rather than pre-rendered, adding a fetch in
-`src/app.js` and a spot for it to patch into the DOM the same way a dropped
-photo does).
+Wiring those last two screens up means the same pattern the rest already
+follow: a fetch in `src/app.js` and a spot for it to patch real content
+into the DOM (see `paintRealFixtures()` for the shape of it), rather than
+build-time data from `build_src/data.py`.
 
 **Caution:** anything baked in at build time lands in `index.html`, which
 ships as a static, publicly-readable file on Cloudflare Pages. Real

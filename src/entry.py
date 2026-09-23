@@ -36,6 +36,8 @@ router.add("POST", "/api/groups/{group_id}/fixtures", handlers.create_fixture)
 router.add("GET", "/api/fixtures/{fixture_id}/seats", handlers.list_seats)
 router.add("PATCH", "/api/seats/{allocation_id}", handlers.update_seat)
 router.add("GET", "/api/groups/{group_id}/listings", handlers.list_listings)
+router.add("GET", "/api/groups/{group_id}/bench-notes", handlers.list_bench_notes)
+router.add("POST", "/api/bench-notes/{note_id}/replies", handlers.create_bench_note_reply)
 
 router.add("GET", "/api/groups/{group_id}/ledger", handlers.get_ledger)
 router.add("POST", "/api/groups/{group_id}/expenses", handlers.create_expense)

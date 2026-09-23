@@ -90,14 +90,22 @@ def header(open_seats_count):
                       "data-role": "season", "data-value": str(y["year"])}, y["label"]) for y in SEASONS],
     )
 
+    # Both badges below are always emitted, never conditionally on
+    # open_seats_count (which build.py always passes as 0 -- the real count
+    # is per-syndicate data paintBenchCountBadge() in app.js only knows once
+    # the real fixtures/seats have loaded). Omitting a badge here whenever
+    # the build-time count is falsy would mean it can never appear later:
+    # app.js only ever updates an existing [data-bench-count] node, it
+    # doesn't create one.
     tabs = h(
         "nav", {"cls": "scroll-row", "style": {"marginTop": "10px"}, "aria-label": "Sections"},
         [h("button", {"cls": "chip", "type": "button", "role": "tab",
                       "aria-selected": "true" if tid == "matchday" else "false",
                       "data-role": "tab", "data-value": tid},
            label,
-           h("span", {"cls": "badge badge--ember", "style": {"marginLeft": "6px"}, "data-bench-count": "true"},
-             str(open_seats_count)) if tid == "bench" and open_seats_count else None)
+           h("span", {"cls": "badge badge--ember", "style": {"marginLeft": "6px"}, "data-bench-count": "true",
+                      "hidden": open_seats_count == 0}, str(open_seats_count))
+           if tid == "bench" else None)
          for tid, label in TABS],
     )
 
@@ -107,7 +115,8 @@ def header(open_seats_count):
                    "aria-label": f"{open_seats_count} seats need attention" if open_seats_count else "No pending requests",
                    "data-role": "goto-bench"},
         Raw(svg("bell", size=18)),
-        h("span", {"cls": "badge badge--ember", "data-bench-count": "true"}, str(open_seats_count)) if open_seats_count else None,
+        h("span", {"cls": "badge badge--ember", "data-bench-count": "true", "hidden": open_seats_count == 0},
+          str(open_seats_count)),
     )
 
     gear = h(
