@@ -79,6 +79,18 @@ async def _get_text(url, headers=None):
     return await response.text()
 
 
+def _snippet(html, limit=1500):
+    """A bounded preview of a page that fetched fine but didn't contain what
+    a selector expected -- attached to the resulting SyncSourceError so it
+    shows up in the GitHub Actions job summary (POST /api/admin/sync's own
+    response body, see docs/backend.md) without needing a browser that can
+    actually reach nwslsoccer.com to see what changed. Whitespace collapsed
+    to keep it to roughly one line per look, not because line breaks in the
+    markup itself matter here."""
+    collapsed = re.sub(r"\s+", " ", html).strip()
+    return collapsed[:limit] + ("..." if len(collapsed) > limit else "")
+
+
 async def _get_json(url, headers=None):
     text = await _get_text(url, headers)
     try:
@@ -174,12 +186,20 @@ async def fetch_nwsl_schedule(env=None):
 
     season_year_match = _SCHEDULE_SEASON_YEAR_RE.search(html)
     if season_year_match is None:
-        raise SyncSourceError("no season year found on the schedule page")
+        raise SyncSourceError(
+            "no season year found on {} ({} bytes received): {}".format(
+                NWSL_SCHEDULE_URL, len(html), _snippet(html)
+            )
+        )
     season_year = season_year_match.group(1)
 
     markers = list(_SCHEDULE_MARKER_RE.finditer(html))
     if not markers:
-        raise SyncSourceError("no matches found on the schedule page")
+        raise SyncSourceError(
+            "no matches found on {} ({} bytes received): {}".format(
+                NWSL_SCHEDULE_URL, len(html), _snippet(html)
+            )
+        )
 
     fixtures = []
     unparsed = 0
@@ -307,10 +327,15 @@ async def fetch_nwsl_roster(env=None, team_id=DENVER_SUMMIT_TEAM_ID, team_slug=D
     like a clean, smaller roster and deactivate everyone missing from it,
     rather than skip the run as a fetch failure normally would.
     """
-    html = await _get_text(_team_roster_url(team_id, team_slug))
+    url = _team_roster_url(team_id, team_slug)
+    html = await _get_text(url)
     starts = [match.start() for match in _ROSTER_ROW_START_RE.finditer(html)]
     if not starts:
-        raise SyncSourceError("no roster rows found on the roster page")
+        raise SyncSourceError(
+            "no roster rows found on {} ({} bytes received): {}".format(
+                url, len(html), _snippet(html)
+            )
+        )
 
     players = []
     unparsed = 0

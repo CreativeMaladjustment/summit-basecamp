@@ -356,6 +356,22 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(SyncSourceError):
             await fetch_nwsl_roster(self.env)
 
+    async def test_fetch_nwsl_roster_error_names_the_url_and_a_page_snippet(self):
+        # When nothing on the page matches at all (not even a partial parse
+        # to report a row count for), the error is otherwise opaque -- no
+        # browser can reach nwslsoccer.com from where this job runs, so the
+        # message itself has to carry enough of the actual page back for a
+        # human to diagnose a markup change from just the job's own summary.
+        html = "<html><body><p>Please enable JavaScript to view this page.</p></body></html>"
+        js.fetch.install({NWSL_ROSTER_URL: FakeFetchResponse(html)})
+
+        with self.assertRaises(SyncSourceError) as cm:
+            await fetch_nwsl_roster(self.env)
+
+        message = str(cm.exception)
+        self.assertIn(NWSL_ROSTER_URL, message)
+        self.assertIn("Please enable JavaScript", message)
+
     async def test_roster_sync_picks_up_a_name_change(self):
         await self._seed_player(name="Ada Okafor")
         await sync_exec(self.env, "UPDATE roster_players SET source_ref = 'https://www.nwslsoccer.com/players/ada-okafor' WHERE id = 'plr_1'")
@@ -592,6 +608,22 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(SyncSourceError):
             await fetch_nwsl_schedule(self.env)
+
+    async def test_fetch_nwsl_schedule_error_names_the_url_and_a_page_snippet(self):
+        # Same reasoning as the roster job's equivalent test: the "no season
+        # year found" case fetched a page fine, it just didn't contain what
+        # the selector expects -- the only way to diagnose that without a
+        # browser that can reach nwslsoccer.com is a snippet of the actual
+        # page baked into this error, surfaced in the job's own summary.
+        html = "<html><body><p>Please enable JavaScript to view this page.</p></body></html>"
+        js.fetch.install({NWSL_SCHEDULE_URL: FakeFetchResponse(html)})
+
+        with self.assertRaises(SyncSourceError) as cm:
+            await fetch_nwsl_schedule(self.env)
+
+        message = str(cm.exception)
+        self.assertIn(NWSL_SCHEDULE_URL, message)
+        self.assertIn("Please enable JavaScript", message)
 
     async def test_fetch_nwsl_schedule_rejects_an_unparseable_kickoff(self):
         # A date/time format change (or plain garbage) must not escape as a
