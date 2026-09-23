@@ -395,13 +395,15 @@ async function signIn(guestId) {
   // skips this screen entirely; more than one lists them to pick from;
   // none, or the request failing, falls back to today's create/join screen.
   let groups = [];
+  let groupsCheckFailed = false;
   try {
     const groupsRes = await fetch(`${API_BASE}/api/groups`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (groupsRes.ok) ({ groups } = await groupsRes.json());
+    else groupsCheckFailed = true;
   } catch {
-    // offline or unreachable -- fall through to create/join, same as before
+    groupsCheckFailed = true; // offline or unreachable -- fall through to create/join
   }
 
   if (groups.length === 1) {
@@ -410,6 +412,11 @@ async function signIn(guestId) {
   }
   showStage('syndicate');
   paintMySyndicates(groups);
+  // Landing here with no syndicate listed looks identical whether someone
+  // really has none yet or the membership check above just failed -- make
+  // that distinction visible instead of silently falling back either way.
+  const checkErrorEl = document.getElementById('syndicate-check-error');
+  if (checkErrorEl) checkErrorEl.hidden = !groupsCheckFailed;
 }
 
 // ---------- Find your syndicate: join or create for real ----------
