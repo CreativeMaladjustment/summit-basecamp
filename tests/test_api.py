@@ -32,6 +32,7 @@ SCHEMA = [
     os.path.join(ROOT, "migrations", "0007_fixture_source_ref_unique.sql"),
     os.path.join(ROOT, "migrations", "0008_group_invite_codes.sql"),
     os.path.join(ROOT, "migrations", "0009_user_contact_info.sql"),
+    os.path.join(ROOT, "migrations", "0010_guest_password_auth.sql"),
 ]
 SEED = os.path.join(ROOT, "seed", "dev_seed.sql")
 
@@ -109,9 +110,89 @@ class ApiTests(unittest.TestCase):
         status, _ = call(self.env, "GET", "/api/groups/grp_summit", user="usr_out")
         self.assertEqual(status, 403)
 
-    def test_sign_in_is_not_implemented_yet(self):
-        status, _ = call(self.env, "POST", "/api/auth/session", user=None, body={})
-        self.assertEqual(status, 501)
+    def test_guest_slots_are_listed_unauthenticated(self):
+        status, payload = call(self.env, "GET", "/api/auth/guests", user=None)
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            [g["id"] for g in payload["guests"]],
+            ["usr_guest1", "usr_guest2", "usr_guest3", "usr_guest4", "usr_guest5", "usr_guest6"],
+        )
+        self.assertEqual(payload["guests"][0]["name"], "Guest 1")
+
+    def test_sign_in_is_unavailable_with_no_site_password_configured(self):
+        # self.env (SEED-backed, no site_pwd) is the default -- a deployment
+        # that never set SITE_PWD refuses every sign-in rather than falling
+        # open to an empty/None comparison.
+        status, payload = call(
+            self.env, "POST", "/api/auth/session", user=None,
+            body={"user_id": "usr_guest1", "password": "anything"},
+        )
+        self.assertEqual(status, 503)
+
+    def test_sign_in_rejects_the_wrong_password(self):
+        env = make_env(SCHEMA, SEED, site_pwd="letmein")
+        status, _ = call(
+            env, "POST", "/api/auth/session", user=None,
+            body={"user_id": "usr_guest1", "password": "nope"},
+        )
+        self.assertEqual(status, 401)
+
+    def test_sign_in_rejects_an_unknown_guest_id(self):
+        env = make_env(SCHEMA, SEED, site_pwd="letmein")
+        status, _ = call(
+            env, "POST", "/api/auth/session", user=None,
+            body={"user_id": "usr_ada", "password": "letmein"},
+        )
+        self.assertEqual(status, 400)
+
+    def test_sign_in_issues_a_session_token_that_authenticates(self):
+        env = make_env(SCHEMA, SEED, site_pwd="letmein")
+        status, payload = call(
+            env, "POST", "/api/auth/session", user=None,
+            body={"user_id": "usr_guest2", "password": "letmein"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["user"]["id"], "usr_guest2")
+        token = payload["token"]
+        self.assertTrue(token)
+
+        # The minted token, not X-Dev-User, is what proves who this is.
+        status, payload = call(
+            env, "GET", "/api/me", user=None, authorization="Bearer " + token
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["user"]["id"], "usr_guest2")
+
+    def test_a_guest_can_rename_their_own_slot(self):
+        env = make_env(SCHEMA, SEED, site_pwd="letmein")
+        _, payload = call(
+            env, "POST", "/api/auth/session", user=None,
+            body={"user_id": "usr_guest3", "password": "letmein"},
+        )
+        token = payload["token"]
+
+        status, payload = call(
+            env, "PATCH", "/api/me", user=None, authorization="Bearer " + token,
+            body={"name": "Priya"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["user"]["name"], "Priya")
+
+        status, payload = call(env, "GET", "/api/auth/guests", user=None)
+        self.assertIn("Priya", [g["name"] for g in payload["guests"]])
+
+    def test_renaming_to_an_empty_name_is_rejected(self):
+        env = make_env(SCHEMA, SEED, site_pwd="letmein")
+        _, payload = call(
+            env, "POST", "/api/auth/session", user=None,
+            body={"user_id": "usr_guest4", "password": "letmein"},
+        )
+        token = payload["token"]
+        status, _ = call(
+            env, "PATCH", "/api/me", user=None, authorization="Bearer " + token,
+            body={"name": "   "},
+        )
+        self.assertEqual(status, 400)
 
     # --- profile ------------------------------------------------------------
 
