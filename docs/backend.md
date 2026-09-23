@@ -80,6 +80,7 @@ curl -H 'X-Dev-User: usr_ada' http://localhost:8787/api/groups
 | POST | `/api/groups/{id}/invite-code/rotate` | Replace a syndicate's invite code (admin) |
 | GET | `/api/groups/{id}/members` | Members only |
 | PATCH | `/api/groups/{id}/members/{user_id}` | Change a member's default seat number (self, or admin for anyone); change a role (admin only) |
+| POST | `/api/groups/{id}/leave` | Remove yourself from a syndicate (blocked if you're its only admin) |
 | GET | `/api/groups/{id}/fixtures` | Fixtures in kickoff order |
 | POST | `/api/groups/{id}/fixtures` | Add a fixture (admin); seats are created with it |
 | GET | `/api/fixtures/{id}/seats` | The seat map for one fixture |
@@ -150,16 +151,22 @@ file work.
 
 Every syndicate has an `invite_code` (`groups.invite_code`, backfilled for
 pre-existing rows by migration `0008`, generated fresh for a new one in
-`create_group`) -- 16 hex characters from `secrets` (`db.new_invite_code`),
-64 bits so it can't be brute-forced over the network (nothing else gates
-`POST /api/groups/join` -- no throttling, no expiry), distinct from the
-shorter, non-secret `new_id()` ids used elsewhere. `POST /api/groups/join`
+`create_group`) -- two words from a curated list (`db.new_invite_code`,
+e.g. `AMBER-CANYON`), ~13 bits, distinct from the shorter, non-secret
+`new_id()` ids used elsewhere. That's traded down from an earlier
+16-hex-character version (64 bits) deliberately, for memorability: nothing
+else gates `POST /api/groups/join` (no throttling, no expiry), so on its
+own this would be brute-forceable, but it isn't on its own -- the app
+already sits behind one shared site password (see "Sign-in" below), and a
+leaked or unwanted code can be rotated out instantly. `POST /api/groups/join`
 looks a code up (case-insensitively) and adds the caller as a plain `member`
 with no `default_seat_number`, the same starting point as anyone else added
 to a syndicate. Already a member: 409. Unknown code: 404.
 `POST /api/groups/{id}/invite-code/rotate` (admin-only) replaces a
 syndicate's code outright, so a leaked or no-longer-wanted one stops working
-without touching anyone already in.
+without touching anyone already in. Campfire Settings surfaces the current
+code (with a Copy button) and this rotate call to whichever member is that
+syndicate's admin.
 
 Deploys apply migrations before deploying the Worker (see "Renaming the
 Worker or Pages project" below, same ordering), so there is a narrow window
@@ -177,6 +184,37 @@ runner has a real, currently-open bug misparsing multi-statement
 [#15690](https://github.com/cloudflare/workers-sdk/issues/15690)) even
 though the same SQL runs fine locally -- worth revisiting once that's fixed
 upstream, not worth risking a broken production migration for now.
+
+## Leaving a syndicate
+
+`POST /api/groups/{id}/leave` (`handlers.leave_group`) removes the caller's
+own `group_members` row -- a member's self-service equivalent of the
+create/join flow, reachable from Campfire Settings' "Switch syndicates"
+card alongside joining a different syndicate or starting a new one (both
+reuse `POST /api/groups/join` and `POST /api/groups` from a sheet there
+rather than duplicating the Find-your-syndicate screen's own forms).
+
+Blocked with 409 if the caller is the syndicate's only admin and other
+members remain -- leaving would take `require_admin`'s gate with them,
+locking everyone else out of every admin-only action. Promoting someone
+else first (`PATCH /api/groups/{id}/members/{user_id}`) clears it. The same
+atomic-guard shape as the demotion check in `update_member`: the `EXISTS`
+clause lives inside the `DELETE` itself, not a `SELECT` beforehand, so a
+concurrent change to who else is admin can't race past it. Leaving as the
+last member of a syndicate empties it rather than deleting it -- deleting
+real fixture/ledger history is not something to do implicitly as a side
+effect of one person's departure; there is currently no route to delete a
+syndicate outright.
+
+Any seat the leaving member still holds on an upcoming fixture --
+`confirmed`, `gifted`, or `resale_listed` -- is released to the bench right
+after (`assigned_user_id`/`guest_name`/`resale_price_cents` cleared, status
+set to `on_bench`), so a departed member never stays "holding" a seat
+nobody else can act on. Seats on already-played fixtures are left alone;
+they're history. *Still open: an admin removing someone else outright --
+there is no route for that, only self-service leaving; an admin can
+reassign a departed member's future seats by hand via `PATCH
+/api/seats/{id}` in the meantime.*
 
 ## Sign-in
 

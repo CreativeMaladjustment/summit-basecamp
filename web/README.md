@@ -56,7 +56,7 @@ expand target that's referenced actually exists, and so on.
 | The 14ers | Package cost, simplified debts, Settle Up, season history |
 | Home Team | Full squad with position filters, stats and scouting notes (a "Peak Tifo" visual grid) |
 | Visitors | The visiting club's dressing room: dossiers, halftime reads, danger flags |
-| Campfire Settings | Push permissions, matchday alerts, Summit Touchline notes mix, profile |
+| Campfire Settings | Push permissions, matchday alerts, Summit Touchline notes mix, profile, invite code, switch/leave/create a syndicate |
 
 Three ways a seat can leave your hands, from the **Call a Sub** sheet:
 

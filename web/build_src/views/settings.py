@@ -30,7 +30,8 @@ def render():
           "What reaches you, when, and on which device."),
         device_banners(),
         h("div", {"cls": "grid-auto", "style": {"alignItems": "start"}},
-          matchday_section(), notes_section(), profile_section(), invite_section(), preview_section()),
+          matchday_section(), notes_section(), profile_section(), switch_section(),
+          invite_section(), preview_section()),
     )
 
 
@@ -140,6 +141,30 @@ def profile_section():
         h("label", {"cls": "field"}, h("span", {"cls": "field__label"}, "Email"),
           h("input", {"cls": "input", "type": "email", "placeholder": "you@example.com", "id": "email"})),
         h("button", {"cls": "btn btn--ghost btn--block", "type": "button", "data-role": "sign-out"}, "Sign out"),
+    )
+
+
+def switch_section():
+    """Every member of a syndicate -- not just its admin -- can join a
+    different one or start a fresh one; both reuse an existing sheet
+    (sheet-join-syndicate mirrors Find-your-syndicate's own join form,
+    sheet-new-syndicate is exactly Find-your-syndicate's create form) rather
+    than duplicating that flow. Leaving lives here too since it's the same
+    "which syndicate is this device in" concern, gated instead by the
+    sheet's own server-side 409 (see handlers.leave_group) when this device
+    is the only admin left."""
+    return h(
+        "section", {"cls": "card"},
+        h("h2", {"cls": "card__title"}, "Switch syndicates"),
+        h("p", {"style": {"margin": "0 0 12px", "fontSize": "13px", "color": "var(--ink-mute)"}},
+          "This device can only be in one syndicate at a time."),
+        h("button", {"cls": "btn btn--ghost btn--block", "type": "button", "style": {"marginBottom": "8px"},
+                     "data-open-sheet": "sheet-join-syndicate"}, "Join a different syndicate"),
+        h("button", {"cls": "btn btn--ghost btn--block", "type": "button", "style": {"marginBottom": "8px"},
+                     "data-open-sheet": "sheet-new-syndicate"}, "Start a new syndicate"),
+        h("button", {"cls": "btn btn--ghost btn--block", "type": "button",
+                     "style": {"color": "var(--summit-sandstone)"},
+                     "data-open-sheet": "sheet-leave-syndicate"}, "Leave this syndicate"),
     )
 
 
