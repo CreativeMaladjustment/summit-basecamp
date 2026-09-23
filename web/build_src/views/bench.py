@@ -3,8 +3,9 @@
 Which seats are open, and any note posted about them, is real per-syndicate
 data that does not exist at build time -- web/src/app.js's
 paintRealFixtures() fills #bench-waiting and #bench-listed from
-GET /api/groups/{id}/listings and .../bench-notes. This module only emits
-the empty section shells and the empty-bench message.
+GET /api/groups/{id}/fixtures and each fixture's .../seats (filtered
+client-side to on_bench/resale_listed), plus .../bench-notes. This module
+only emits the empty section shells and the empty-bench message.
 """
 from __future__ import annotations
 

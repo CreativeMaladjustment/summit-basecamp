@@ -569,19 +569,34 @@ function avatarEl(label, empty) {
   return av;
 }
 
+// Status decides the label first -- update_seat deliberately keeps
+// assigned_user_id pointing at the original holder for a gifted or
+// resale-listed seat (they're still the authorized actor for it), so
+// checking assigned_user_id before status would show the donor's own name
+// instead of the guest they gifted it to, or "Listed outside" for a seat
+// they've listed but not actually vacated.
 function seatHolderLabel(seat) {
-  if (seat.assigned_user_id) return seat.assigned_user_name || 'Member';
-  if (seat.guest_name) return seat.guest_name;
+  if (seat.status === 'gifted') return seat.guest_name || 'Guest';
   if (seat.status === 'resale_listed') return 'Listed outside';
   if (seat.status === 'on_bench') return 'On the bench';
+  if (seat.assigned_user_id) return seat.assigned_user_name || 'Member';
   return 'Open';
+}
+
+// Same status-first reasoning as seatHolderLabel -- a resale-listed seat
+// still carries its original holder's assigned_user_id, but visually reads
+// as an open (dashed) avatar, same as on_bench, not a solid one implying
+// the lister still occupies it.
+function seatIsEmpty(seat) {
+  if (seat.status === 'resale_listed' || seat.status === 'on_bench') return true;
+  return !seat.assigned_user_id && !seat.guest_name;
 }
 
 function seatLineEl(seat, onDark) {
   const wrap = document.createElement('div');
   wrap.style.cssText = 'display:flex;align-items:center;gap:8px';
   const label = seatHolderLabel(seat);
-  wrap.appendChild(avatarEl(label, !seat.assigned_user_id && !seat.guest_name));
+  wrap.appendChild(avatarEl(label, seatIsEmpty(seat)));
   const meta = document.createElement('div');
   const nameP = document.createElement('p');
   nameP.style.cssText = `margin:0;font-size:13px;font-weight:600;${onDark ? 'color:#fff' : ''}`;
@@ -635,15 +650,26 @@ async function paintRealFixtures() {
   paintBenchCountBadge();
 }
 
+// Matches the backend's own list_listings filter (src/handlers.py) -- a
+// seat still on_bench/resale_listed for a fixture whose kickoff has already
+// passed isn't really "going spare" for anyone to claim, so it's excluded
+// from the count and from Bench's own lists the same way the real listings
+// endpoint would exclude it.
+function isUpcoming(fixture) {
+  return new Date(fixture.kickoff_at) >= new Date();
+}
+
 function paintBenchCountBadge() {
-  const count = realFixturesCache.reduce(
-    (n, { seats }) => n + seats.filter((s) => s.status === 'on_bench' || s.status === 'resale_listed').length,
-    0,
-  );
+  const count = realFixturesCache
+    .filter(({ fixture }) => isUpcoming(fixture))
+    .reduce((n, { seats }) => n + seats.filter((s) => s.status === 'on_bench' || s.status === 'resale_listed').length, 0);
   for (const el of document.querySelectorAll('[data-bench-count]')) {
     el.textContent = String(count);
+    el.hidden = count === 0;
     el.closest('button')?.classList.toggle('is-empty', count === 0);
   }
+  const bell = document.querySelector('[data-role="goto-bench"]');
+  if (bell) bell.setAttribute('aria-label', count ? `${count} seats need attention` : 'No pending requests');
 }
 
 function nextFixtureEntry() {
@@ -711,7 +737,10 @@ function paintMatchdayHero() {
 
   const actions = document.createElement('div');
   actions.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:16px';
-  const mySeat = seats.find((s) => s.assigned_user_id === state.user?.id);
+  // status === 'confirmed' -- a gifted or resale-listed seat still carries
+  // my assigned_user_id (see seatHolderLabel above), but it's already left
+  // my hands; Call a Sub has nothing left to do with it.
+  const mySeat = seats.find((s) => s.assigned_user_id === state.user?.id && s.status === 'confirmed');
   if (mySeat) {
     const btn = document.createElement('button');
     btn.className = 'btn btn--ember';
@@ -745,15 +774,21 @@ function pitchStatusPill(seats) {
     span.textContent = 'Listed outside';
     return span;
   }
+  // Only 'confirmed' or 'gifted' seats can reach here (bench/listed already
+  // returned above) -- seatHolderLabel gives the gifted guest's own name
+  // rather than the donor's, same reasoning as everywhere else it's used.
   const names = seats.filter((s) => s.assigned_user_id || s.guest_name)
-    .map((s) => s.assigned_user_name || s.guest_name).join(' & ');
+    .map((s) => seatHolderLabel(s)).join(' & ');
   span.className = 'badge badge--green';
   span.textContent = names ? `Starting · ${names}` : 'Starting';
   return span;
 }
 
 function pitchRowEl(fixture, seats) {
-  const mySeat = seats.find((s) => s.assigned_user_id === state.user?.id);
+  // status === 'confirmed' -- same reasoning as the Matchday hero's own
+  // mySeat check: a gifted or resale-listed seat still carries my
+  // assigned_user_id, but it's already left my hands.
+  const mySeat = seats.find((s) => s.assigned_user_id === state.user?.id && s.status === 'confirmed');
   const isBench = seats.some((s) => s.status === 'on_bench' || s.status === 'resale_listed');
 
   const row = document.createElement('article');
@@ -785,7 +820,7 @@ function pitchRowEl(fixture, seats) {
 
   const statusRow = document.createElement('div');
   statusRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap';
-  for (const seat of seats) statusRow.appendChild(avatarEl(seatHolderLabel(seat), !seat.assigned_user_id && !seat.guest_name));
+  for (const seat of seats) statusRow.appendChild(avatarEl(seatHolderLabel(seat), seatIsEmpty(seat)));
   statusRow.appendChild(pitchStatusPill(seats));
   row.appendChild(statusRow);
 
@@ -843,14 +878,25 @@ function paintPitchRows() {
   applyPitchFilter();
 }
 
-function latestNoteFor(fixtureId, seatNumber) {
-  // realBenchNotesCache is newest-first (see list_bench_notes) -- the first
-  // match is the most recent note about this exact seat.
-  return realBenchNotesCache.find((n) => n.fixture_id === fixtureId && n.seat_number === seatNumber) || null;
+// migrations/0012_bench_notes.sql keys a note by (fixture_id, seat_number)
+// only -- there's no link to which specific release event it was posted
+// about, so a seat claimed and released again *without* a new note would
+// otherwise still surface the previous release's now-stale note (wrong
+// body, wrong cost/amount, and a "Take the Pitch" button on a thread that
+// isn't about the seat's current turn on the bench). A note only counts
+// for the seat's *current* stay on the bench if it was posted at or after
+// that seat's own last update -- the same PATCH that set status=on_bench
+// either wrote a note in the same request or didn't, so a genuinely
+// current note's posted_at can never be earlier than seat.updated_at.
+function latestNoteFor(fixtureId, seatNumber, seat) {
+  const matches = realBenchNotesCache.filter((n) => n.fixture_id === fixtureId && n.seat_number === seatNumber);
+  if (!seat?.updated_at) return matches[0] || null; // realBenchNotesCache is newest-first
+  const cutoff = parseSqliteUtc(seat.updated_at);
+  return matches.find((n) => parseSqliteUtc(n.posted_at) >= cutoff) || null;
 }
 
 function benchCardEl(fixture, seat, claimable) {
-  const note = latestNoteFor(fixture.id, seat.seat_number);
+  const note = latestNoteFor(fixture.id, seat.seat_number, seat);
   const free = !!note && note.cost_path === 'free';
 
   const card = document.createElement('article');
@@ -951,7 +997,7 @@ function paintBenchLists() {
   listedList.innerHTML = '';
   let waitingCount = 0;
   let listedCount = 0;
-  for (const { fixture, seats } of realFixturesCache) {
+  for (const { fixture, seats } of realFixturesCache.filter(({ fixture: f }) => isUpcoming(f))) {
     for (const seat of seats) {
       if (seat.status === 'on_bench') {
         waitingList.appendChild(benchCardEl(fixture, seat, true));
@@ -1065,17 +1111,21 @@ function paintBenchNotesSection() {
   if (!section || !list) return;
   list.innerHTML = '';
 
-  // Only a note about a seat that's still actually on the bench has
-  // anything left to act on -- one already claimed or pulled back stays in
-  // realBenchNotesCache (it's still real history) but drops out of this
-  // "needs someone" section.
+  // One thread per seat currently on the bench, not one per note --
+  // iterating notes directly could render the same seat twice if it was
+  // claimed and released more than once (each release's note is kept, see
+  // latestNoteFor), and a seat already claimed or pulled back has nothing
+  // left to act on here even though its past notes stay in
+  // realBenchNotesCache as real history.
   let shown = 0;
-  for (const note of realBenchNotesCache) {
-    const entry = realFixturesCache.find(({ fixture }) => fixture.id === note.fixture_id);
-    const seat = entry?.seats.find((s) => s.seat_number === note.seat_number);
-    if (!seat || seat.status !== 'on_bench') continue;
-    list.appendChild(benchNoteThreadEl(note, entry.fixture, seat));
-    shown += 1;
+  for (const { fixture, seats } of realFixturesCache.filter(({ fixture: f }) => isUpcoming(f))) {
+    for (const seat of seats) {
+      if (seat.status !== 'on_bench') continue;
+      const note = latestNoteFor(fixture.id, seat.seat_number, seat);
+      if (!note) continue;
+      list.appendChild(benchNoteThreadEl(note, fixture, seat));
+      shown += 1;
+    }
   }
   section.hidden = shown === 0;
 }
@@ -1129,9 +1179,12 @@ async function claimRealSeat(allocationId) {
     await patchSeat(allocationId, { status: 'confirmed' });
   } catch {
     // No dedicated error slot next to every claim/pull-back button spread
-    // across three screens -- the next real paint (which just ran, on
-    // success or not) already shows the truth either way, so a stale click
-    // (someone else just took it) fails silently rather than needing one.
+    // across three screens, so a stale click (someone else just took it,
+    // a 409) fails without a message rather than needing one -- but the
+    // card itself must still catch up to what really happened, which
+    // patchSeat's own re-paint never ran here since it only follows a
+    // successful PATCH.
+    paintRealFixtures();
   }
 }
 
