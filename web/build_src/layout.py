@@ -70,7 +70,7 @@ def header(open_seats_count):
                  "aria-label": "Syndicate", "style": {
                     "display": "flex", "alignItems": "baseline", "gap": "6px",
                     "minWidth": "0", "padding": "10px 12px"}},
-        h("strong", {"style": {
+        h("strong", {"data-role": "syndicate-name", "style": {
             "fontWeight": "700", "overflow": "hidden", "textOverflow": "ellipsis",
             "whiteSpace": "nowrap"}}, syn["name"]),
         h("span", {"style": {"fontSize": "13px", "color": "var(--ink-mute)", "whiteSpace": "nowrap"}},

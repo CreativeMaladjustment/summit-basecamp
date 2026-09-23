@@ -49,7 +49,7 @@ expand target that's referenced actually exists, and so on.
 | Screen | What it does |
 | --- | --- |
 | Landing | Summit Basecamp lockup, tonight's Summit Touchline notes as teasers, Continue with Google / Apple |
-| Find your syndicate | Invite code, the circles you've been invited to, or start a new one |
+| Find your syndicate | Join by invite code, or start a new one |
 | Matchday | Next Match hero, Summit Touchline carousel, bench note threads, balance line |
 | The 14er Pass | Every home fixture in the season, filtered by All / My Matches / On the Bench |
 | The Bench | Seats waiting for a sub and anything listed on an external exchange |

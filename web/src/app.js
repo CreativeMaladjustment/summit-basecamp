@@ -27,6 +27,7 @@ const state = Object.assign({
   season: '2026',
   claimedSeats: [],         // seat keys claimed from the bench
   releasedSeats: [],        // seats you gave up via Call a Sub
+  syndicateName: null,      // set once "Start a new syndicate" is submitted
   prefs: { checkin3Day: true, benchAlerts: true, dailyBio: true, bioScope: 'home_first', pushEnabled: false },
   photos: {},                // playerId -> data URL, restored on load
 }, load());
@@ -339,6 +340,17 @@ function paintPreview() {
   if (scopeEl) scopeEl.textContent = `Mix: ${scopeLabel}.`;
 }
 
+// Every element carrying the syndicate's name -- the header readout and
+// the Settings profile card -- shares this data-role so both update
+// together, whether that's on load (a name set in an earlier session) or
+// right after "Start a new syndicate" is submitted.
+function paintSyndicateName() {
+  if (!state.syndicateName) return;
+  for (const node of document.querySelectorAll('[data-role="syndicate-name"]')) {
+    node.textContent = state.syndicateName;
+  }
+}
+
 function label12(hhmm) {
   const [h24, m] = hhmm.split(':').map(Number);
   const suffix = h24 >= 12 ? 'PM' : 'AM';
@@ -359,6 +371,7 @@ function main() {
   hydratePrefs();
   paintDeviceBanner();
   paintPreview();
+  paintSyndicateName();
 
   document.querySelectorAll('.switch[data-pref]').forEach(wireToggle);
   document.getElementById('checkin-time')?.addEventListener('change', paintPreview);
@@ -387,10 +400,6 @@ function main() {
       case 'join-syndicate':
         showStage('app');
         showTab('matchday');
-        return;
-      case 'start-new-syndicate':
-        showStage('app');
-        showTab('settings');
         return;
       case 'sign-out':
         localStorage.removeItem(KEY);
@@ -579,6 +588,23 @@ function main() {
   });
 
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
+
+  // A real <form>, not a bare button, so pressing Enter in the name field
+  // submits it and the browser's own required-field validation applies --
+  // preventDefault stops the GET-navigation a plain form submit would
+  // otherwise try, since there's nothing server-side here to receive it.
+  document.getElementById('new-syndicate-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const nameInput = document.getElementById('new-syn-name');
+    const name = nameInput.value.trim();
+    if (!name) { nameInput.focus(); return; }
+    state.syndicateName = name;
+    paintSyndicateName();
+    persist();
+    closeSheet();
+    showStage('app');
+    showTab('matchday');
+  });
 }
 
 document.addEventListener('DOMContentLoaded', main);
