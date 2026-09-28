@@ -127,17 +127,17 @@ async def main():
         players_python = "[\n"
         for p in op["players"]:
             players_python += (
-                f'        {{"id": "{p["id"]}", "num": {p["num"]}, "name": "{p["name"]}", '
-                f'"pos": "{p["pos"]}", "danger": {str(p["danger"]).lower()}, '
-                f'"note": "{p["note"]}"}},\n'
+                f'        {{"id": {json.dumps(p["id"])}, "num": {p["num"]}, "name": {json.dumps(p["name"])}, '
+                f'"pos": {json.dumps(p["pos"])}, "danger": {repr(p["danger"])}, '
+                f'"note": {json.dumps(p["note"])}}},\n'
             )
         players_python += "    ]"
 
         opponents_python += f'''    {{
-        "id": "{op["id"]}", "club": "{op["club"]}", "chip": "{op["chip"]}",
-        "home_date": "{op["home_date"]}", "away_date": "{op["away_date"]}",
-        "away_venue": "{op["away_venue"]}", "recent_result": "{op["recent_result"]}",
-        "match_url": "{op["match_url"]}", "players": {players_python}
+        "id": {json.dumps(op["id"])}, "club": {json.dumps(op["club"])}, "chip": {json.dumps(op["chip"])},
+        "home_date": {json.dumps(op["home_date"])}, "away_date": {json.dumps(op["away_date"])},
+        "away_venue": {json.dumps(op["away_venue"])}, "recent_result": {json.dumps(op["recent_result"])},
+        "match_url": {json.dumps(op["match_url"])}, "players": {players_python}
     }},
 '''
     opponents_python += "]\n"
@@ -145,7 +145,7 @@ async def main():
     # Replace the OPPONENTS list in the file
     new_content = re.sub(
         r"OPPONENTS = \[(.*?)\n\n(?=POSITIONS|$)",
-        opponents_python + "\n",
+        lambda _: opponents_python + "\n",
         content,
         flags=re.DOTALL
     )
