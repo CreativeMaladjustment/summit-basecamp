@@ -119,12 +119,6 @@ def _urlenc(text):
 
 
 # ---------- Home Team (the Locker Room) ----------
-# The real, verified roster page src/sync_sources.py reads (see
-# NWSL_ROSTER_URL there) -- used as the "Club bio" link for every Home Team
-# player, replacing a guessed denversummitfc.com URL that was never
-# confirmed to be real.
-DENVER_ROSTER_URL = "https://www.nwslsoccer.com/teams/cbfcacbef5bc4a278442c00926ac9ebc/denver-summit-fc/roster"
-
 SQUAD = [
     {"id": "p1", "num": 1, "name": "Abby Smith", "pos": "GK",
      "stats": [("Position", "Goalkeeper"), ("Nationality", "USA")],

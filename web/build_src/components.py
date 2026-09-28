@@ -65,6 +65,18 @@ def bio_links(name, club_url, club_label="Club bio", wiki_query=None):
     )
 
 
+def player_club_bio_url(player_name):
+    """Generate Denver Summit FC club bio URL for a player.
+    Example: 'Abby Smith' -> 'https://www.denversummitfc.com/club/roster/abby-smith/'"""
+    slug = _name_to_slug(player_name)
+    return f"https://www.denversummitfc.com/club/roster/{slug}/"
+
+
+def _name_to_slug(name):
+    """Convert player name to URL slug (lowercase, hyphen-separated)."""
+    return name.lower().replace(" ", "-")
+
+
 def _urlenc(text):
     from urllib.parse import quote
     return quote(text)
