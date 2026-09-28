@@ -53,6 +53,23 @@ class D1HttpTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
         patcher.start()
 
+    def _install_sequential_responses(self, payloads):
+        """Like _install_response, but returns a different payload for each
+        successive call -- for batch(), which now sends one request per
+        statement rather than one combined request for all of them."""
+        bodies = [json.dumps(payload).encode("utf-8") for payload in payloads]
+        call_count = {"n": 0}
+
+        def fake_urlopen(request, timeout=None):
+            self.captured_requests.append(request)
+            index = call_count["n"]
+            call_count["n"] += 1
+            return FakeUrlopenContext(200, bodies[index])
+
+        patcher = mock.patch("urllib.request.urlopen", side_effect=fake_urlopen)
+        self.addCleanup(patcher.stop)
+        patcher.start()
+
     def test_all_returns_rows_from_the_first_result_entry(self):
         self._install_response(200, {"success": True, "result": [{"results": [{"id": "grp_1"}]}]})
         db = LiveD1("acct_1", "db_1", "tok_1")
@@ -118,16 +135,22 @@ class D1HttpTests(unittest.TestCase):
             asyncio.run(db.prepare("NOT VALID SQL").all())
         self.assertIn("bad sql", str(cm.exception))
 
-    def test_batch_sends_one_object_per_statement_with_its_own_params(self):
-        # A real Cloudflare D1 400 ("params with multiple statements is not
-        # supported") proved the request body must be a JSON array of
-        # {sql, params} objects, one per statement -- not one semicolon-
-        # joined SQL string sharing a single flattened params array (what
-        # this method sent before, and the exact shape that 400 rejected).
-        self._install_response(200, {
-            "success": True,
-            "result": [{"meta": {"changes": 1}}, {"meta": {"changes": 4}}],
-        })
+    def test_batch_sends_one_separate_request_per_statement_in_order(self):
+        # Two real Cloudflare D1 400s, in production, proved there is no
+        # way to submit a true multi-statement atomic batch to the D1 HTTP
+        # query API at all: one combined every statement into a single
+        # ';'-joined SQL string sharing one flattened params array
+        # ("The request is malformed: params with multiple statements is
+        # not supported"); the other sent a JSON array of one {sql,
+        # params} object per statement ("Invalid input: Expected object,
+        # received array"). The endpoint's request body is strictly a
+        # single {sql, params?} object -- so batch() must send one request
+        # per statement, each with only its own params, and is no longer
+        # atomic (see LiveD1.batch's own docstring).
+        self._install_sequential_responses([
+            {"success": True, "result": [{"meta": {"changes": 1}}]},
+            {"success": True, "result": [{"meta": {"changes": 4}}]},
+        ])
         db = LiveD1("acct_1", "db_1", "tok_1")
         statements = [
             db.prepare("INSERT INTO fixtures (id, opponent) VALUES (?, ?)").bind("fix_1", "Reign"),
@@ -139,14 +162,36 @@ class D1HttpTests(unittest.TestCase):
         results = asyncio.run(db.batch(statements))
 
         self.assertEqual([r.meta.changes for r in results], [1, 4])
-        body = json.loads(self.captured_requests[0].data)
+        self.assertEqual(len(self.captured_requests), 2)
         self.assertEqual(
-            body,
-            [
-                {"sql": "INSERT INTO fixtures (id, opponent) VALUES (?, ?)", "params": ["fix_1", "Reign"]},
-                {"sql": "INSERT INTO seat_allocations (fixture_id, seat_number) VALUES (?, ?)", "params": ["fix_1", 1]},
-            ],
+            json.loads(self.captured_requests[0].data),
+            {"sql": "INSERT INTO fixtures (id, opponent) VALUES (?, ?)", "params": ["fix_1", "Reign"]},
         )
+        self.assertEqual(
+            json.loads(self.captured_requests[1].data),
+            {"sql": "INSERT INTO seat_allocations (fixture_id, seat_number) VALUES (?, ?)", "params": ["fix_1", 1]},
+        )
+
+    def test_batch_stops_after_a_failing_statement_without_running_the_rest(self):
+        # A direct consequence of no longer being one atomic call: a
+        # failure partway through must not silently continue on to later
+        # statements (it also must not roll back the ones that already
+        # succeeded -- there is nothing left in this class that could).
+        self._install_sequential_responses([
+            {"success": False, "errors": [{"message": "bad sql"}]},
+        ])
+        db = LiveD1("acct_1", "db_1", "tok_1")
+        statements = [
+            db.prepare("INSERT INTO fixtures (id, opponent) VALUES (?, ?)").bind("fix_1", "Reign"),
+            db.prepare("INSERT INTO seat_allocations (fixture_id, seat_number) VALUES (?, ?)").bind("fix_1", 1),
+        ]
+
+        import asyncio
+
+        with self.assertRaises(D1HttpError):
+            asyncio.run(db.batch(statements))
+
+        self.assertEqual(len(self.captured_requests), 1)
 
     def test_batch_of_nothing_makes_no_request(self):
         db = LiveD1("acct_1", "db_1", "tok_1")

@@ -450,21 +450,32 @@ async def _create_fixture_from_sync(env, group, remote):
     also finds this group missing this match would insert a duplicate
     fixture and its own full set of seats.
 
-    The fixture insert and every seat insert run in one D1 batch (one
-    atomic transaction), not two separate calls: a Worker interrupted
-    between two separate calls could otherwise leave a fixture row with no
-    seats at all forever, since a fixture already matched by source_ref is
-    only ever updated after that, never re-created to backfill what's
-    missing. The seat insert is a single WITH RECURSIVE INSERT ... SELECT,
-    not one INSERT ... VALUES per seat_number built from group["total_seats"]:
-    that field is a snapshot the caller (_sync_fixtures) read before this
-    batch, and an admin resizing total_seats (handlers.update_group)
-    concurrently with a sync run could otherwise leave a synced fixture
-    seeded from the stale count. Bounding the recursive seat_numbers CTE by
-    a correlated subquery against groups.total_seats instead reads it live,
-    inside this same transaction. The final SELECT still runs WHERE EXISTS
-    against this fixture_id, so a fixture insert IGNOREd by the race guard
-    above still correctly creates no seats.
+    The fixture insert and the seat insert are sent as one env.DB.batch()
+    call, run inside the deployed Worker (where a real Workers-runtime
+    transaction still backs .batch()). Running via scripts/run_sync.py on
+    GitHub Actions instead -- the sync job's actual execution path today,
+    see docs/backend.md -- env.DB is db.LiveD1 (scripts/d1_http.py), whose
+    .batch() runs each statement as its own separate D1 HTTP API call, NOT
+    atomically: the D1 HTTP query API's request body is strictly a single
+    {sql, params?} object, with no way to submit a true multi-statement
+    atomic batch to it (confirmed against real Cloudflare 400s -- see
+    LiveD1.batch's own docstring). So a crash between the two calls below
+    can, in practice, leave a fixture row with no seats at all, since a
+    fixture already matched by source_ref is only ever updated after
+    that, never re-created to backfill what's missing -- a narrow,
+    manually-recoverable gap accepted in exchange for the sync running at
+    all outside the Worker. The seat insert is still a single WITH
+    RECURSIVE INSERT ... SELECT, not one INSERT ... VALUES per
+    seat_number built from group["total_seats"]: that field is a snapshot
+    the caller (_sync_fixtures) read before this batch, and an admin
+    resizing total_seats (handlers.update_group) concurrently with a sync
+    run could otherwise leave a synced fixture seeded from the stale
+    count. Bounding the recursive seat_numbers CTE by a correlated
+    subquery against groups.total_seats instead reads it live, at least
+    within its own statement even when the two statements no longer share
+    one transaction. The final SELECT still runs WHERE EXISTS against
+    this fixture_id, so a fixture insert IGNOREd by the race guard above
+    still correctly creates no seats.
     """
     fixture_id = new_id("fix")
     writes = [
