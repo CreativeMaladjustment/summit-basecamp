@@ -25,12 +25,12 @@ def _parse_date(date_str):
 
 
 def _get_upcoming_opponents():
-    """Filter opponents to only show upcoming games (away_date in future)."""
+    """Filter opponents to only show upcoming HOME games (home_date in future)."""
     today = datetime.now().date()
     upcoming = []
     for op in OPPONENTS:
-        away_date = _parse_date(op["away_date"])
-        if away_date and away_date >= today:
+        home_date = _parse_date(op["home_date"])
+        if home_date and home_date >= today:
             upcoming.append(op)
     return upcoming if upcoming else OPPONENTS
 
