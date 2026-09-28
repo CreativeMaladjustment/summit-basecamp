@@ -1640,10 +1640,18 @@ async function paintVisitors() {
 
   let opponents = [];
   try {
-    const res = await fetch(`${API_BASE}/api/opponents`);
-    if (!res.ok) return;
+    const headers = {};
+    if (state.sessionToken) {
+      headers.Authorization = `Bearer ${state.sessionToken}`;
+    }
+    const res = await fetch(`${API_BASE}/api/opponents`, { headers });
+    if (!res.ok) {
+      teamSheet.innerHTML = '<p style="margin:0;color:var(--ink-mute)">Could not load opponent data.</p>';
+      return;
+    }
     ({ opponents } = await res.json());
-  } catch {
+  } catch (err) {
+    teamSheet.innerHTML = '<p style="margin:0;color:var(--ink-mute)">Could not load opponent data.</p>';
     return;
   }
 
