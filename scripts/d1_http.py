@@ -103,28 +103,37 @@ class LiveD1:
         return result[0] if result else {}
 
     async def batch(self, statements):
-        """Run every statement as one D1 API call -- the same atomicity
-        env.DB.batch() gives inside a Worker (see sync._create_fixture_from_sync,
-        which reads groups.total_seats live inside the same transaction its
-        own seat-count insert runs in, specifically to avoid a resize race).
+        """Run each statement as its own D1 HTTP API call, in order --
+        NOT atomically. This is a real, deliberate reduction from what
+        env.DB.batch() guarantees inside a Worker (see
+        sync._create_fixture_from_sync's own docstring): there, a fixture
+        insert and its seat inserts commit-or-rollback together. Here, a
+        crash or network failure between the two calls below can leave a
+        fixture row with no seats, which is never backfilled by a later
+        run once that fixture is matched by source_ref (see
+        _create_fixture_from_sync) -- a rare, manually-recoverable gap
+        this trades for the sync actually running at all. See
+        docs/backend.md for the full story.
 
-        The request body is a JSON *array* of {"sql", "params"} objects, one
-        per statement, each with its own independently-bound params -- not
-        one combined SQL string with a single flattened params array. An
-        earlier version of this method built exactly that combined form
-        (statements' SQL joined by ';', their params concatenated into one
-        list) on the assumption that the HTTP query API's only
-        multi-statement input was one semicolon-joined body sharing a single
-        params array; that was wrong, and broke every fixture-creation sync
-        run with a real 400 from Cloudflare: "The request is malformed:
-        params with multiple statements is not supported". The API does
-        execute multiple statements atomically in one call, but only when
-        each one is a separate object in the request body, each carrying
-        its own params -- see
-        https://developers.cloudflare.com/api/operations/cloudflare-d1-query-database
-        (the "Send multiple queries" batch form)."""
-        if not statements:
-            return []
-        body = [{"sql": statement._sql, "params": list(statement._params)} for statement in statements]
-        result = _post(self._url, self._api_token, body)
-        return [_RunResult((entry.get("meta") or {}).get("changes", 0) or 0) for entry in result]
+        Two earlier versions of this method both tried to submit every
+        statement to the D1 HTTP query API in one call, to keep that
+        atomicity, and both were proven wrong by real 400s against
+        production: one combined all statements into one ';'-joined SQL
+        string sharing a single flattened params array ("The request is
+        malformed: params with multiple statements is not supported");
+        the other sent a JSON array of one {sql, params} object per
+        statement ("Invalid input: Expected object, received array").
+        That second error is conclusive: this endpoint's request body is
+        strictly a single {sql, params?} object, nothing else -- there is
+        no way to submit a true multi-statement atomic batch to it at
+        all. The Workers binding's .batch() atomicity is a runtime-level
+        feature with no HTTP API equivalent, not something this class can
+        reproduce from outside the Worker.
+        """
+        results = []
+        for statement in statements:
+            response = _post(self._url, self._api_token, {"sql": statement._sql, "params": list(statement._params)})
+            entry = response[0] if response else {}
+            meta = entry.get("meta") or {}
+            results.append(_RunResult(meta.get("changes", 0) or 0))
+        return results
