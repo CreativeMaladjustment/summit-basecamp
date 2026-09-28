@@ -14,7 +14,6 @@ import json
 import os
 import re
 import sys
-import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -116,10 +115,6 @@ async def main():
     data_py_path = os.path.join(ROOT, "web/build_src/data.py")
     with open(data_py_path, "r", encoding="utf-8") as f:
         content = f.read()
-
-    # Find and replace OPPONENTS list
-    # Match from "OPPONENTS = [" to the closing "]" at the end of the list
-    pattern = r"OPPONENTS = \[([^\]]*)\]"
 
     # Build the new OPPONENTS Python code
     opponents_python = "OPPONENTS = [\n"
