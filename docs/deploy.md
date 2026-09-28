@@ -68,10 +68,10 @@ After a rename lands:
    run (Workers don't need pre-creating); the new Pages project needs one
    run of "Provision Cloudflare resources" (`resource: pages`) first, the
    same way the original project was created.
-2. Update the `CF_API_BASE_URL` repository variable
-   (`.github/workflows/sync-roster.yml`) to the new Worker's hostname --
-   forgetting this doesn't error, it just keeps calling the old Worker.
-   Check `CF_PAGES_PROJECT` too, if one is set.
+2. Update `web/src/app.js`'s own hardcoded `API_BASE` constant to the new
+   Worker's hostname -- forgetting this doesn't error, the deployed
+   frontend just keeps calling the old Worker. Check `CF_PAGES_PROJECT` too,
+   if one is set.
 3. Confirm the new Worker (`GET /api/health`) and the new Pages site both
    work.
 4. Only then, run `decommission-cloudflare.yml` by hand (once per resource)

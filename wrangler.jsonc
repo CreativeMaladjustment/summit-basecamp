@@ -7,24 +7,19 @@
   // summit-hearth-api Worker keeps existing (and keeps serving whatever it
   // last deployed) until .github/workflows/archive/decommission-cloudflare.yml
   // (move it back into .github/workflows/ first -- GitHub Actions doesn't
-  // discover workflows in subdirectories) is run against it by hand, after
-  // CF_API_BASE_URL (the GitHub variable .github/workflows/sync-roster.yml
-  // reads) has been updated to this new hostname -- deleting the old one
-  // first, or before that variable is updated, breaks the next scheduled
-  // sync silently.
+  // discover workflows in subdirectories) is run against it by hand -- see
+  // docs/deploy.md's rename checklist for what else needs updating first
+  // (web/src/app.js's own hardcoded API_BASE, most importantly).
   "name": "summit-basecamp-api",
   "main": "src/entry.py",
   "compatibility_date": "2024-12-05",
   "compatibility_flags": ["python_workers"],
 
   // Non-secret config only. Secrets are set with `wrangler secret put <NAME>`
-  // and are never committed here -- except SYNC_ADMIN_TOKEN and SITE_PWD,
-  // both pushed by deploy.yml from a same-named GitHub secret on every
-  // deploy, no local wrangler needed. SYNC_ADMIN_TOKEN (from
-  // CF_SYNC_ADMIN_TOKEN) authenticates POST /api/admin/sync (see
-  // src/handlers.trigger_sync); sync-roster.yml sends it as a bearer token.
-  // SITE_PWD is the one shared password gating all six guest slots on the
-  // landing screen (see src/auth.verify_site_password and
+  // and are never committed here -- except SITE_PWD, pushed by deploy.yml
+  // from a same-named GitHub secret on every deploy, no local wrangler
+  // needed. SITE_PWD is the one shared password gating all six guest slots
+  // on the landing screen (see src/auth.verify_site_password and
   // src/handlers.begin_session) -- set it once as the SITE_PWD secret in
   // the "sb" GitHub environment.
   "vars": {
@@ -66,8 +61,9 @@
   ],
 
   // Two daily jobs only -- the weekly roster/fixture/headshot sync used to
-  // be a third cron here, but now runs via POST /api/admin/sync, triggered
-  // by .github/workflows/sync-roster.yml instead (see src/entry.py).
+  // be a third cron here, but now runs directly from GitHub Actions instead
+  // (.github/workflows/sync-roster.yml, scripts/run_sync.py), writing to D1
+  // over Cloudflare's HTTP API rather than going through this Worker at all.
   "triggers": {
     "crons": [
       "0 8 * * *",

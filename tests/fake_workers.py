@@ -233,7 +233,6 @@ def make_env(
     schema_path,
     seed_path=None,
     environment="development",
-    sync_admin_token=None,
     site_pwd=None,
 ):
     """``schema_path`` is one migration file, or a list applied in order --
@@ -255,6 +254,5 @@ def make_env(
         SESSIONS=FakeKV(),
         AVATARS=FakeKV(),
         ENVIRONMENT=environment,
-        SYNC_ADMIN_TOKEN=sync_admin_token,
         SITE_PWD=site_pwd,
     )

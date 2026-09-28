@@ -2,9 +2,9 @@
 
 `on_fetch` serves the JSON API; `on_scheduled` runs the two daily crons
 declared in wrangler.jsonc. The roster/fixture/headshot sync is not one of
-them -- it runs via POST /api/admin/sync, called by
-.github/workflows/sync-roster.yml on a push to main and on its own
-schedule, so its logs and history live in GitHub Actions.
+them, and has no route here either -- it runs from GitHub Actions instead
+(scripts/run_sync.py, triggered by .github/workflows/sync-roster.yml),
+writing to D1 over Cloudflare's HTTP API rather than through this Worker.
 """
 
 from js import URL
@@ -52,8 +52,6 @@ router.add("PUT", "/api/preferences", handlers.update_preferences)
 
 router.add("PUT", "/api/me/avatar", handlers.upload_avatar)
 router.add("GET", "/api/avatars/{user_id}", handlers.get_avatar)
-
-router.add("POST", "/api/admin/sync", handlers.trigger_sync)
 
 
 # The PWA is served from Pages on its own origin, so the API answers
