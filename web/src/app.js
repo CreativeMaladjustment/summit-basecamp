@@ -1535,6 +1535,172 @@ function label12(hhmm) {
   return `${hr}:${String(m).padStart(2, '0')} ${suffix}`;
 }
 
+// ---------- Visitors: opponent roster viewing ----------
+
+let visitorsOpponentsCache = [];
+let visitorsSelectedOpponent = null;
+
+function filterUpcomingHomeGames(opponents) {
+  const now = new Date();
+  return opponents.filter((op) => {
+    if (!op.home_date) return false;
+    return new Date(op.home_date) >= now;
+  }).sort((a, b) => new Date(a.home_date) - new Date(b.home_date));
+}
+
+function makePlayerCard(player) {
+  const card = document.createElement('div');
+  card.style.cssText = 'display:flex;gap:10px;padding:12px;border:1px solid var(--hairline);border-radius:6px;align-items:flex-start';
+
+  const jersey = document.createElement('div');
+  jersey.style.cssText = 'width:48px;height:48px;background:#134E48;color:#fff;border-radius:4px;display:flex;align-items:center;justify-content:center;font-weight:700;flex:none';
+  jersey.textContent = String(player.num || '—');
+
+  const info = document.createElement('div');
+  info.style.cssText = 'flex:1;min-width:0';
+
+  const name = document.createElement('p');
+  name.style.cssText = 'margin:0;font-weight:600;font-size:14px';
+  name.textContent = player.name || '';
+
+  const pos = document.createElement('p');
+  pos.style.cssText = 'margin:2px 0 0;font-size:12px;color:var(--ink-mute)';
+  pos.textContent = player.pos || '';
+
+  info.append(name, pos);
+
+  if (player.note) {
+    const note = document.createElement('p');
+    note.style.cssText = 'margin:6px 0 0;font-size:12px;color:var(--ink-soft);font-style:italic';
+    note.textContent = `"${player.note}"`;
+    info.appendChild(note);
+  }
+
+  if (player.danger) {
+    const badge = document.createElement('span');
+    badge.style.cssText = 'display:inline-block;margin-top:6px;padding:2px 6px;background:var(--summit-ember);color:#fff;border-radius:3px;font-size:11px;font-weight:500';
+    badge.textContent = '⚡ Danger';
+    info.appendChild(badge);
+  }
+
+  card.append(jersey, info);
+  return card;
+}
+
+function makeDossierCard(opponent) {
+  const card = document.createElement('div');
+  card.style.cssText = 'background:var(--surface);border:1px solid var(--hairline-strong);border-radius:6px;padding:14px;margin-bottom:12px';
+  card.dataset.opponentId = opponent.id;
+
+  const header = document.createElement('div');
+  header.style.cssText = 'display:flex;justify-content:space-between;align-items:start;margin-bottom:12px';
+
+  const title = document.createElement('div');
+  const club = document.createElement('p');
+  club.style.cssText = 'margin:0;font-weight:600;font-size:16px';
+  club.textContent = opponent.club;
+  const matchDate = document.createElement('p');
+  matchDate.style.cssText = 'margin:4px 0 0;font-size:12px;color:var(--ink-mute)';
+  matchDate.textContent = opponent.home_date ? `${matchDateLabel(opponent.home_date)} at ${opponent.away_venue}` : '';
+  title.append(club, matchDate);
+
+  let badge;
+  if (opponent.recent_result) {
+    badge = document.createElement('span');
+    badge.className = 'badge badge--mute';
+    badge.textContent = opponent.recent_result;
+  }
+
+  header.append(title);
+  if (badge) header.appendChild(badge);
+  card.appendChild(header);
+
+  const rosterLabel = document.createElement('p');
+  rosterLabel.className = 'eyebrow';
+  rosterLabel.style.cssText = 'margin:0 0 10px;font-size:11px';
+  rosterLabel.textContent = 'Squad';
+  card.appendChild(rosterLabel);
+
+  const playersList = document.createElement('div');
+  playersList.style.cssText = 'display:flex;flex-direction:column;gap:8px';
+  for (const player of opponent.players) {
+    playersList.appendChild(makePlayerCard(player));
+  }
+  card.appendChild(playersList);
+
+  return card;
+}
+
+async function paintVisitors() {
+  const teamSheet = document.getElementById('visitors-team-sheet');
+  const chipsContainer = document.getElementById('visitors-chips');
+  const dossiersContainer = document.getElementById('visitors-dossiers');
+
+  if (!teamSheet || !chipsContainer || !dossiersContainer) return;
+
+  let opponents = [];
+  try {
+    const res = await fetch(`${API_BASE}/api/opponents`);
+    if (!res.ok) return;
+    ({ opponents } = await res.json());
+  } catch {
+    return;
+  }
+
+  opponents = opponents.map((op) => ({
+    ...op,
+    players: (op.players || []).map((p) => ({
+      id: p.id,
+      num: p.jersey_number || p.num,
+      name: p.name,
+      pos: p.position || p.pos,
+      danger: p.is_danger || p.danger,
+      note: p.scouting_note || p.note || '',
+    })),
+  }));
+
+  opponents = filterUpcomingHomeGames(opponents);
+  visitorsOpponentsCache = opponents;
+
+  if (!opponents.length) {
+    teamSheet.innerHTML = '<p style="margin:0;color:var(--ink-mute)">No upcoming home games scheduled.</p>';
+    chipsContainer.innerHTML = '';
+    dossiersContainer.innerHTML = '';
+    return;
+  }
+
+  teamSheet.innerHTML = `<p style="margin:0;font-size:14px;color:var(--ink-soft)">${opponents.length} opponent${opponents.length !== 1 ? 's' : ''} ahead</p>`;
+
+  chipsContainer.innerHTML = '';
+  for (const opponent of opponents) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip';
+    chip.dataset.role = 'visitors-chip';
+    chip.dataset.opponentId = opponent.id;
+    chip.setAttribute('aria-selected', String(visitorsSelectedOpponent === opponent.id));
+    chip.textContent = opponent.chip;
+    chipsContainer.appendChild(chip);
+  }
+
+  dossiersContainer.innerHTML = '';
+  for (const opponent of opponents) {
+    const dossier = makeDossierCard(opponent);
+    dossier.hidden = visitorsSelectedOpponent !== null && visitorsSelectedOpponent !== opponent.id;
+    dossiersContainer.appendChild(dossier);
+  }
+
+  if (!visitorsSelectedOpponent && opponents.length) {
+    visitorsSelectedOpponent = opponents[0].id;
+    chipsContainer.querySelectorAll('[data-role="visitors-chip"]').forEach((chip) => {
+      chip.setAttribute('aria-selected', String(chip.dataset.opponentId === visitorsSelectedOpponent));
+    });
+    dossiersContainer.querySelectorAll('[data-opponent-id]').forEach((d) => {
+      d.hidden = d.dataset.opponentId !== visitorsSelectedOpponent;
+    });
+  }
+}
+
 // ---------- Wiring ----------
 
 function main() {
@@ -1560,6 +1726,7 @@ function main() {
   paintRealSyndicateDetail();
   paintRealFixtures();
   paintTouchlineBio();
+  paintVisitors();
 
   document.querySelectorAll('.switch[data-pref]').forEach(wireToggle);
   document.getElementById('checkin-time')?.addEventListener('change', paintPreview);
@@ -1685,6 +1852,13 @@ function main() {
       case 'opponent': {
         document.querySelectorAll('[data-role="opponent"]').forEach((c) => c.setAttribute('aria-selected', String(c === el)));
         document.querySelectorAll('[data-opponent-block]').forEach((b) => { b.hidden = b.dataset.opponentBlock !== el.dataset.value; });
+        return;
+      }
+      case 'visitors-chip': {
+        const opponentId = el.dataset.opponentId;
+        visitorsSelectedOpponent = opponentId;
+        document.querySelectorAll('[data-role="visitors-chip"]').forEach((c) => c.setAttribute('aria-selected', String(c.dataset.opponentId === opponentId)));
+        document.querySelectorAll('[data-opponent-id]').forEach((d) => { d.hidden = d.dataset.opponentId !== opponentId; });
         return;
       }
       case 'bio-scope': {
