@@ -536,15 +536,12 @@ async def _sync_opponents(env):
     dossier useful has to come from a human, so this job only keeps the
     dates on dossiers that already exist current.
 
-    Matched by source_ref (nwslsoccer.com's own team id for that club, read
-    off the schedule page -- see fetch_nwsl_schedule) when a row already has
-    one, falling back to a club-name match for rows that predate this and
-    setting source_ref the first time that succeeds -- same two-step
-    matching _sync_roster uses. A club rename upstream no longer needs a
-    manual re-match once source_ref is set, unlike the previous name-only
-    matching this replaced.
+    Switched from nwslsoccer.com to denversummitfc.com schedule after NWSL
+    site became client-side rendered. Matches by club name since DSFC site
+    has no stable team IDs. Existing opponents already have source_ref set
+    from seeding, so source_ref won't be updated, only dates.
     """
-    remote_fixtures = await fetch_nwsl_schedule(env)
+    remote_fixtures = await fetch_dsfc_schedule(env)
     existing = await query(env, "SELECT id, club, source_ref, home_date, away_date FROM opponents")
     by_ref = {row["source_ref"]: row for row in existing if row["source_ref"]}
     by_club = {row["club"]: row for row in existing}
