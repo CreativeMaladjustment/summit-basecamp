@@ -54,15 +54,16 @@ def _database_id():
 
 async def fetch_opponents(db):
     """Fetch all opponents from the database."""
-    return await db.all("SELECT * FROM opponents ORDER BY sort_order")
+    result = await db.prepare("SELECT * FROM opponents ORDER BY sort_order").all()
+    return result.results
 
 
 async def fetch_opponent_players(db, opponent_id):
     """Fetch all players for an opponent."""
-    return await db.all(
-        "SELECT * FROM opponent_players WHERE opponent_id = ? AND active ORDER BY sort_order, jersey_number",
-        [opponent_id]
-    )
+    result = await db.prepare(
+        "SELECT * FROM opponent_players WHERE opponent_id = ? AND active ORDER BY sort_order, jersey_number"
+    ).bind(opponent_id).all()
+    return result.results
 
 
 async def main():
