@@ -8,7 +8,8 @@ name: Diagnose denversummitfc.com markup
 # Deleted once that's answered; not meant to stay in the repo.
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [claude/keen-sagan-fh09u5]
 
 permissions:
   contents: read
