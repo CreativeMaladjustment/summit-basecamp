@@ -1,0 +1,65 @@
+name: Diagnose denversummitfc.com markup
+
+# Temporary, one-off: fetches Denver Summit's own site (schedule + roster
+# pages) from a real GitHub Actions runner and prints a landmark search
+# over the raw HTML, the same technique src/sync_sources.py's own
+# SyncSourceError diagnostics use -- so we can see whether these pages are
+# server-rendered (scrapeable) before writing a real parser against them.
+# Deleted once that's answered; not meant to stay in the repo.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Fetch and inspect
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch and report
+        shell: python3 {0}
+        run: |
+          import re
+          import urllib.request
+
+          LANDMARKS = (
+              "__NEXT_DATA__", "application/ld+json", "data-player-id",
+              "jersey", "position", "match", "schedule", "opponent",
+              "fixture", "kickoff", "vs.", " vs ", "roster",
+          )
+
+          def probe(url):
+              print("=" * 70)
+              print(url)
+              print("=" * 70)
+              req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      status = resp.status
+                      html = resp.read().decode("utf-8", "replace")
+              except Exception as error:
+                  print("FETCH FAILED:", repr(error))
+                  return
+              print("HTTP", status, "-", len(html), "bytes")
+
+              found_any = False
+              for landmark in LANDMARKS:
+                  idx = html.lower().find(landmark.lower())
+                  if idx == -1:
+                      continue
+                  found_any = True
+                  window = html[max(0, idx - 300):idx + 900]
+                  collapsed = re.sub(r"\s+", " ", window).strip()
+                  print("---", repr(landmark), "at offset", idx, "---")
+                  print(collapsed)
+                  print()
+              if not found_any:
+                  collapsed = re.sub(r"\s+", " ", html).strip()
+                  print("NO LANDMARKS FOUND. Head of document:")
+                  print(collapsed[:3000])
+              print()
+
+          probe("https://www.denversummitfc.com/schedule/")
+          probe("https://www.denversummitfc.com/roster/")
