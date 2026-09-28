@@ -59,6 +59,25 @@ WIKIPEDIA_API = "https://en.wikipedia.org/w/api.php"
 # A descriptive User-Agent, as Wikimedia's API etiquette asks for.
 WIKIPEDIA_USER_AGENT = "SquadSeatsSyncBot/1.0 (https://github.com/CreativeMaladjustment/summit-basecamp)"
 
+# NWSL club names to Wikipedia page titles for fetching current squad data
+WIKIPEDIA_TEAM_PAGES = {
+    "Angel City": "Angel_City_FC",
+    "Bay": "Bay_FC",
+    "Boston Legacy": "Boston_Legacy_FC",
+    "Chicago Stars": "Chicago_Stars_FC",
+    "Gotham FC": "Gotham_FC",
+    "Houston Dash": "Houston_Dash",
+    "Kansas City Current": "Kansas_City_Current",
+    "North Carolina Courage": "North_Carolina_Courage",
+    "Orlando Pride": "Orlando_Pride",
+    "Portland Thorns": "Portland_Thorns_FC",
+    "Racing Louisville": "Racing_Louisville_FC",
+    "San Diego Wave": "San_Diego_Wave_FC",
+    "Seattle Reign": "Seattle_Reign_FC",
+    "Utah Royals": "Utah_Royals",
+    "Washington Spirit": "Washington_Spirit",
+}
+
 # Licenses permissive enough to redistribute an image without further
 # clearance. Anything else (including plain "Fair use") is skipped -- public
 # data only, nothing copyrighted, per floutenvy's 2026-09-21 instruction.
@@ -673,6 +692,102 @@ async def fetch_wikipedia_headshot(player_name):
             "attribution": "{}, {}, via Wikimedia Commons".format(artist, license_name),
         }
     return None
+
+
+async def fetch_wikipedia_roster(club_name):
+    """Fetch a club's current squad from their Wikipedia page.
+
+    Parses the squad/roster table to extract player name, position, and jersey number.
+    Returns a list of dicts with: name, position, jersey_number, source_ref (None).
+    Raises SyncSourceError if the page can't be fetched or parsed.
+    """
+    page_title = WIKIPEDIA_TEAM_PAGES.get(club_name)
+    if not page_title:
+        raise SyncSourceError(
+            "No Wikipedia page mapping for club '{}'".format(club_name)
+        )
+
+    url = "https://en.wikipedia.org/wiki/{}".format(page_title)
+    html = await _get_text(url)
+
+    # Look for a squad/roster table. Wikipedia typically uses wikitable class.
+    # Tables usually have columns: No., Name, Position, etc.
+    # We'll look for rows with player data.
+    players = []
+
+    # Find all tables with class "wikitable"
+    table_pattern = r'<table[^>]*class="[^"]*wikitable[^"]*"[^>]*>.*?</table>'
+    tables = re.findall(table_pattern, html, re.DOTALL)
+
+    if not tables:
+        raise SyncSourceError(
+            "No squad table found on Wikipedia page for {}".format(club_name)
+        )
+
+    # Process each table to find the squad one
+    for table_html in tables:
+        rows = re.findall(r'<tr[^>]*>(.*?)</tr>', table_html, re.DOTALL)
+
+        table_players = []
+        for row in rows:
+            # Skip header rows
+            if re.search(r'<th[^>]*>No\.|Number|Name', row, re.IGNORECASE):
+                continue
+
+            # Extract cells (td elements)
+            cells = re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL)
+            if len(cells) < 2:
+                continue
+
+            # Clean cell content (remove HTML tags, decode entities)
+            cleaned_cells = []
+            for cell in cells:
+                # Remove wiki links and tags
+                cell_text = re.sub(r'\[\[([^\]]*)\]\]', r'\1', cell)  # [[link|text]] -> text
+                cell_text = re.sub(r'\[\[([^\]]*)\|([^\]]*)\]\]', r'\2', cell_text)  # handle alt text
+                cell_text = _strip_html(cell_text).strip()
+                cell_text = html_entities.unescape(cell_text)
+                cleaned_cells.append(cell_text)
+
+            if len(cleaned_cells) < 2:
+                continue
+
+            # Try to extract: No., Name, Position (positions vary by table)
+            # Most tables: No., Name, Position, Nat., etc.
+            jersey_str = cleaned_cells[0]
+            name = cleaned_cells[1] if len(cleaned_cells) > 1 else None
+            position = cleaned_cells[2] if len(cleaned_cells) > 2 else None
+
+            if not name:
+                continue
+
+            # Parse jersey number (handle cases like "1" or numbers with symbols)
+            jersey_number = None
+            if jersey_str and jersey_str.isdigit():
+                jersey_number = int(jersey_str)
+
+            # Normalize position abbreviations
+            if position:
+                position = position.strip()
+
+            table_players.append({
+                "name": name,
+                "position": position or None,
+                "jersey_number": jersey_number,
+                "source_ref": None,
+            })
+
+        # If we found players in this table, it's likely the squad table
+        if table_players:
+            players = table_players
+            break
+
+    if not players:
+        raise SyncSourceError(
+            "Could not parse squad table on Wikipedia page for {}".format(club_name)
+        )
+
+    return players
 
 
 _TAG_RE = re.compile(r"<[^>]+>")
