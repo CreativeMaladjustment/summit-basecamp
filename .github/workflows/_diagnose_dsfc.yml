@@ -90,19 +90,10 @@ jobs:
                       print("marker not found at all")
               print()
 
-          probe("https://www.denversummitfc.com/schedule/", article_marker='<article class="schedule__match')
-
-          # Roster page: we don't know the repeating player-card class yet.
-          # Scan for likely WP-theme naming patterns and dump a window
-          # around whichever shows up, past the header/nav boilerplate.
-          ROSTER_CANDIDATES = (
-              "roster__grid", "roster__list", "roster__card", "roster__item",
-              "roster__player", "player-card", "player__card", "player__item",
-              "team-member", "athlete-card", "jersey-number", "data-number",
-              "wp-block-query", "wp-block-post-template", "headshot",
-          )
-
-          def probe_roster(url):
+          # Full card block, and a scan for any digit-only field near it (a
+          # jersey number, if the card carries one at all -- the previous
+          # pass's truncated window didn't reach the end of a card).
+          def probe_roster_card(url):
               print("=" * 70)
               print(url)
               print("=" * 70)
@@ -110,13 +101,27 @@ jobs:
               with urllib.request.urlopen(req, timeout=30) as resp:
                   html = resp.read().decode("utf-8", "replace")
               print("HTTP", resp.status, "-", len(html), "bytes")
-              for candidate in ROSTER_CANDIDATES:
-                  idx = html.lower().find(candidate.lower())
-                  if idx == -1:
-                      continue
-                  window = html[max(0, idx - 200):idx + 2500]
-                  print("--- %r found at offset %d ---" % (candidate, idx))
-                  print(window)
-                  print()
+              print("count of 'roster__card' marker:", html.count('class="roster__card"'))
 
-          probe_roster("https://www.denversummitfc.com/roster/")
+              first = html.find('class="roster__card"')
+              # Back up to the start of the <a ... tag this class attribute
+              # belongs to, then to the next card's same point, for one full
+              # card end to end.
+              tag_start = html.rfind("<a", 0, first)
+              second = html.find('class="roster__card"', first + 1)
+              tag_end = html.rfind("<a", 0, second) if second != -1 else len(html)
+              block = html[tag_start:tag_end]
+              print("--- first full card (%d chars) ---" % len(block))
+              print(block)
+              print()
+
+              print("digit runs anywhere in that card block:", re.findall(r"\d+", block))
+              print()
+
+              # Also check whether the roster has separate sections (e.g. a
+              # "Coaching Staff" heading) after the player grid, and roughly
+              # how many player cards total.
+              for heading in re.finditer(r'<h\d[^>]*>([^<]{2,60})</h\d>', html):
+                  print("heading:", heading.group(1).strip())
+
+          probe_roster_card("https://www.denversummitfc.com/roster/")
