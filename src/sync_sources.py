@@ -356,6 +356,17 @@ _POSITION_CODES = {
     "forward": "FWD",
 }
 
+_WIKIPEDIA_POSITION_CODES = {
+    "gk": "GK",
+    "def": "DEF",
+    "d": "DEF",
+    "mid": "MID",
+    "m": "MID",
+    "fwd": "FWD",
+    "fw": "FWD",
+    "f": "FWD",
+}
+
 
 async def fetch_nwsl_roster(env=None, team_id=DENVER_SUMMIT_TEAM_ID, team_slug=DENVER_SUMMIT_TEAM_SLUG):
     """A team's current roster, from its team roster page. Defaults to
@@ -769,6 +780,7 @@ async def fetch_wikipedia_roster(club_name):
             # Normalize position abbreviations
             if position:
                 position = position.strip()
+                position = _WIKIPEDIA_POSITION_CODES.get(position.lower(), position)
 
             table_players.append({
                 "name": name,

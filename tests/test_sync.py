@@ -883,25 +883,38 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_opponent_roster_sync_skips_a_club_with_no_source_on_file(self):
-        await self._seed_opponent(source_ref=None, source_slug=None)
+        # Seed an opponent with a club name that's NOT in WIKIPEDIA_TEAM_PAGES
+        # (all seeded opponents have real club names, so they'll all be tracked now)
+        # Create a fake club not in Wikipedia mapping instead
+        await sync_exec(
+            self.env,
+            "INSERT INTO opponents (id, club, chip_label, source_ref, source_slug) VALUES (?, ?, ?, ?, ?)",
+            "op_fake",
+            "Fake Club",
+            "Fake Club",
+            None,
+            None,
+        )
 
         result = await sync._sync_opponent_rosters(self.env)
 
-        self.assertEqual(result["tracked"], 0)
+        # Fake Club is not in WIKIPEDIA_TEAM_PAGES, so it will error (not tracked)
+        self.assertIn("error", result["clubs"]["Fake Club"])
         players = await sync_query(self.env, "SELECT COUNT(*) AS n FROM opponent_players")
         self.assertEqual(players[0]["n"], 0)
 
     async def test_opponent_roster_sync_inserts_real_players_for_a_tracked_club(self):
-        await self._seed_opponent(source_ref="9587b8ce40624165903b6bc9fd252634", source_slug="angel-city-fc")
-        roster_html = (
-            "<html><body><table><tbody>"
-            + _roster_row("cccc3333cccc3333cccc3333cccc3333", "Sam", "Striker", "sam-striker", 7, "Forward")
-            + "</tbody></table></body></html>"
+        await self._seed_opponent(club="Angel City")
+        wikipedia_html = (
+            "<html><body><table class=\"wikitable\"><tbody>"
+            "<tr><th>No.</th><th>Name</th><th>Position</th></tr>"
+            "<tr><td>7</td><td>Sam Striker</td><td>FW</td></tr>"
+            "</tbody></table></body></html>"
         )
         js.fetch.install(
             {
-                "https://www.nwslsoccer.com/teams/9587b8ce40624165903b6bc9fd252634/angel-city-fc/roster": FakeFetchResponse(
-                    roster_html
+                "https://en.wikipedia.org/wiki/Angel_City_FC": FakeFetchResponse(
+                    wikipedia_html
                 )
             }
         )
