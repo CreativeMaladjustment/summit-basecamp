@@ -235,12 +235,12 @@ async def fetch_nwsl_schedule(env=None):
 
     season_year_match = _SCHEDULE_SEASON_YEAR_RE.search(html)
     if season_year_match is None:
-        raise SyncSourceError(
-            "no season year found on {} ({} bytes received): {}".format(
-                NWSL_SCHEDULE_URL, len(html), _snippet(html)
-            )
-        )
-    season_year = season_year_match.group(1)
+        # NWSL website markup changes frequently. Default to current year if pattern not found.
+        # This allows the job to continue parsing matches even if the season header moved.
+        import datetime
+        season_year = str(datetime.datetime.now().year)
+    else:
+        season_year = season_year_match.group(1)
 
     markers = list(_SCHEDULE_MARKER_RE.finditer(html))
     if not markers:
