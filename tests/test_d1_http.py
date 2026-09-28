@@ -8,8 +8,8 @@ import json
 import os
 import sys
 import unittest
+import unittest.mock as mock
 import urllib.error
-from unittest import mock
 
 HERE = os.path.dirname(__file__)
 ROOT = os.path.join(HERE, "..")
