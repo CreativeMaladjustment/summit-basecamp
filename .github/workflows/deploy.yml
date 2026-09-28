@@ -158,6 +158,17 @@ jobs:
         run: |
           echo "::warning::Migrations exist but no D1 database name was found in the wrangler config. Set the CF_D1_DATABASE repository variable, or name the database in wrangler.toml. Skipping migrations rather than guessing."
 
+      # Seed initial reference data (opponents, etc.) -- idempotent via ON CONFLICT DO UPDATE
+      - name: Seed opponent reference data
+        if: needs.detect.outputs.d1-database != ''
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: ${{ needs.detect.outputs.worker-dir }}
+          wranglerVersion: '4.135.0'
+          command: d1 execute ${{ needs.detect.outputs.d1-database }} --remote --file=seed/opponents_seed.sql
+
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
         with:
