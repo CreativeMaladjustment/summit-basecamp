@@ -6,11 +6,20 @@ by .github/workflows/sync-roster.yml -- not a Worker cron, and not through
 the deployed Worker either; see that file, scripts/run_sync.py and
 docs/backend.md for why. Each job below fetches its source through
 sync_sources, matches what it got against the existing rows, and writes
-only what drifted -- existing rows
-keep their id and any hand-curated fields (scouting_note, stats_json, ...)
-that the source does not speak to. A source field that came back empty
-(missing jersey number, missing position, missing venue) never overwrites an
-existing value with a blank -- it just means that field didn't drift.
+only what drifted -- existing rows keep their id and any hand-curated
+fields (scouting_note, stats_json, ...) that the source does not speak to.
+A source field that came back empty (missing jersey number, missing
+position, missing venue) never overwrites an existing value with a blank --
+it just means that field didn't drift.
+
+Denver Summit's own roster (_sync_roster) and schedule (_sync_fixtures) are
+sourced from denversummitfc.com (fetch_dsfc_roster/fetch_dsfc_schedule);
+every other opponent's dates (_sync_opponents) and rosters
+(_sync_opponent_rosters) still come from nwslsoccer.com
+(fetch_nwsl_schedule/fetch_nwsl_roster), which as of 2026-09-27 no longer
+renders any of that data server-side -- see sync_sources.py's own
+docstrings and docs/backend.md for the full story and why the two jobs
+were not switched together.
 
 Matching is by `source_ref` when a row already has one (set the first time
 the job successfully matches it), falling back to a name match for rows
@@ -45,7 +54,14 @@ image_path untouched.
 import datetime
 
 from db import batch, execute, new_id, query
-from sync_sources import SyncSourceError, fetch_nwsl_roster, fetch_nwsl_schedule, fetch_wikipedia_headshot
+from sync_sources import (
+    SyncSourceError,
+    fetch_dsfc_roster,
+    fetch_dsfc_schedule,
+    fetch_nwsl_roster,
+    fetch_nwsl_schedule,
+    fetch_wikipedia_headshot,
+)
 
 # How far a fixture's remote kickoff date may drift from what's on file and
 # still be considered the same match, the first time a row is matched (before
@@ -88,8 +104,14 @@ async def _sync_roster(env):
     off it -- a full roster listing implies anyone not on it has departed.
     Deactivating rather than deleting keeps their history (national-team
     caps, past stats) intact; handlers.list_roster filters to active rows.
+
+    Sourced from Denver Summit's own site (fetch_dsfc_roster), not
+    nwslsoccer.com -- see that function's docstring. It never provides a
+    jersey number, so a brand-new signing is updated/reactivated normally
+    once an admin has created their row (jersey number included) by hand,
+    but never auto-created from this sync alone.
     """
-    remote_players = await fetch_nwsl_roster(env)
+    remote_players = await fetch_dsfc_roster(env)
     existing = await query(
         env, "SELECT id, source_ref, name, jersey_number, position, active FROM roster_players"
     )
@@ -300,7 +322,11 @@ async def _sync_one_opponent_roster(env, opponent_id, remote_players):
 
 
 async def _sync_fixtures(env):
-    remote_fixtures = await fetch_nwsl_schedule(env)
+    # Sourced from Denver Summit's own site (fetch_dsfc_schedule), not
+    # nwslsoccer.com -- see that function's docstring for why, and why
+    # _sync_opponents below deliberately keeps using fetch_nwsl_schedule
+    # instead.
+    remote_fixtures = await fetch_dsfc_schedule(env)
     existing = await query(
         env, "SELECT id, group_id, source_ref, opponent, kickoff_at, venue FROM fixtures"
     )

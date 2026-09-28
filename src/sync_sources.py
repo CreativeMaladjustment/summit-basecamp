@@ -7,6 +7,7 @@ returns plain dicts/lists -- no D1, no js.Response objects past this module.
 """
 
 import datetime
+import html as html_entities
 import json
 import re
 
@@ -405,6 +406,223 @@ def _to_int(value):
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+# Denver Summit's own site, used instead of nwslsoccer.com for Denver
+# Summit's own schedule and roster (see fetch_dsfc_schedule and
+# fetch_dsfc_roster below) -- nwslsoccer.com's team pages hydrate
+# client-side now (confirmed against a live snapshot on 2026-09-27: zero
+# server-rendered player/match data anywhere in the page), while
+# denversummitfc.com is still a plain server-rendered WordPress site with
+# schema.org microdata per match/player.
+DSFC_SCHEDULE_URL = "https://www.denversummitfc.com/schedule/"
+DSFC_ROSTER_URL = "https://www.denversummitfc.com/roster/"
+
+# denversummitfc.com 403s a request carrying only a bare "Mozilla/5.0"
+# User-Agent -- confirmed against a live GitHub Actions run on 2026-09-28,
+# where that exact request failed from the runner's IP but succeeded
+# immediately from a residential one, and then succeeded from the *same*
+# runner IP once Accept/Accept-Language were added alongside a real
+# browser's User-Agent string. So this is a naive bot-header check, not an
+# IP block -- unlike nwslsoccer.com, which serves any client the same way.
+_DSFC_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+_DSFC_MATCH_START_RE = re.compile(r'<article class="schedule__match')
+_DSFC_INDICATOR_RE = re.compile(r'schedule__match-indicator--(home|away)')
+_DSFC_KICKOFF_RE = re.compile(r'<time[^>]*\sdatetime="([^"]+)"[^>]*itemprop="startDate"')
+_DSFC_OPPONENT_RE = re.compile(r'schedule__match-opponent-name"\s+itemprop="name">\s*([^<]+?)\s*</div>')
+_DSFC_URL_RE = re.compile(r'<meta itemprop="url" content="([^"]+)">')
+# The visible venue block's markup differs for a home match (a link to the
+# stadium's own info page) from an away one (a plain span) -- but every
+# match also carries a hidden schema.org Place alongside it
+# (itemprop="location" ... itemprop="name"), identical either way, so that's
+# what this reads instead of matching two different visible layouts.
+_DSFC_VENUE_RE = re.compile(r'itemprop="location"[^>]*>\s*<span itemprop="name">([^<]*)</span>')
+
+
+def _parse_dsfc_kickoff(datetime_attr):
+    """"2026-10-04T14:00:00-06:00" -> a naive local ISO string, dropping the
+    UTC offset. sync.py's _sync_fixtures compares kickoff_at against a naive
+    (UTC) "now" with a wide _KICKOFF_TIMEZONE_SLOP margin built to absorb
+    exactly this kind of naive-local-vs-UTC gap -- the same contract
+    fetch_nwsl_schedule's own naive strptime result already had (see its
+    docstring and sync._KICKOFF_TIMEZONE_SLOP). Keeping the offset instead
+    would raise a naive/aware TypeError the moment sync.py compared the two.
+    May raise ValueError on a malformed attribute -- callers must catch it,
+    same as fetch_nwsl_schedule's _parse_kickoff.
+    """
+    return datetime.datetime.fromisoformat(datetime_attr).replace(tzinfo=None).isoformat()
+
+
+async def fetch_dsfc_schedule(env=None):
+    """Denver Summit's own match schedule, scraped from their own site
+    (DSFC_SCHEDULE_URL) rather than nwslsoccer.com -- see the module-level
+    comment above DSFC_SCHEDULE_URL for why.
+
+    Returns a list of dicts in the same shape fetch_nwsl_schedule does --
+    source_ref, opponent, opponent_team_id, kickoff_at, kickoff_time_known,
+    venue, is_home -- except opponent_team_id is always None: this site has
+    no per-club stable id the way nwslsoccer.com's data-team-id did. That's
+    why _sync_fixtures (which never reads opponent_team_id) uses this
+    function while _sync_opponents (which matches other clubs' dossiers by
+    that id, across 15+ clubs, not just Denver Summit) still uses
+    fetch_nwsl_schedule: switching it too would overwrite every opponent's
+    already-recorded source_ref with None on the very next run, rather than
+    just leave it unable to set a new one. See docs/backend.md for this
+    split.
+
+    Also unlike fetch_nwsl_schedule, this page appears to list only
+    remaining matches for the season, not finished ones -- not handled
+    specially here, since sync.py doesn't need finished matches for
+    anything (an existing fixture row for an already-played match just
+    doesn't get touched if it drops off this page).
+
+    kickoff_time_known is always True: every match here carries a full
+    datetime (see _DSFC_KICKOFF_RE), unlike a finished nwslsoccer.com match,
+    whose row dropped the kickoff time widget entirely.
+
+    Raises SyncSourceError on any row this can't fully parse, not just when
+    the whole page yields nothing -- same reasoning as fetch_nwsl_schedule.
+    """
+    html = await _get_text(DSFC_SCHEDULE_URL, headers=_DSFC_HEADERS)
+
+    starts = [match.start() for match in _DSFC_MATCH_START_RE.finditer(html)]
+    if not starts:
+        raise SyncSourceError(
+            "no matches found on {} ({} bytes received): {}".format(
+                DSFC_SCHEDULE_URL, len(html), _snippet(html)
+            )
+        )
+
+    fixtures = []
+    unparsed = 0
+    for index, start in enumerate(starts):
+        end = starts[index + 1] if index + 1 < len(starts) else len(html)
+        row = html[start:end]
+
+        indicator_match = _DSFC_INDICATOR_RE.search(row)
+        kickoff_match = _DSFC_KICKOFF_RE.search(row)
+        opponent_match = _DSFC_OPPONENT_RE.search(row)
+        url_match = _DSFC_URL_RE.search(row)
+        venue_match = _DSFC_VENUE_RE.search(row)
+
+        if (
+            indicator_match is None
+            or kickoff_match is None
+            or opponent_match is None
+            or url_match is None
+            or venue_match is None
+        ):
+            unparsed += 1
+            continue
+
+        try:
+            kickoff_at = _parse_dsfc_kickoff(kickoff_match.group(1))
+        except ValueError:
+            unparsed += 1
+            continue
+
+        fixtures.append(
+            {
+                "source_ref": url_match.group(1),
+                "opponent": html_entities.unescape(opponent_match.group(1)).strip(),
+                "opponent_team_id": None,
+                "kickoff_at": kickoff_at,
+                "kickoff_time_known": True,
+                "venue": html_entities.unescape(venue_match.group(1)).strip(),
+                "is_home": indicator_match.group(1) == "home",
+            }
+        )
+    if unparsed:
+        raise SyncSourceError(
+            "parsed {} of {} schedule rows on {} -- schedule page markup may have changed".format(
+                len(fixtures), len(fixtures) + unparsed, DSFC_SCHEDULE_URL
+            )
+        )
+    return fixtures
+
+
+_DSFC_ROSTER_CARD_RE = re.compile(r'<a\s+href="(?P<href>[^"]+)"\s+class="roster__card"')
+_DSFC_ROSTER_NAME_RE = re.compile(
+    r'roster__card-first-name"\s+itemprop="givenName">([^<]*)</span>'
+    r'\s*<span class="roster__card-last-name"\s+itemprop="familyName">([^<]*)</span>'
+)
+_DSFC_ROSTER_POSITION_RE = re.compile(r'roster__card-position"\s+itemprop="jobTitle">([^<]*)</span>')
+
+
+async def fetch_dsfc_roster(env=None):
+    """Denver Summit's current roster, scraped from their own site
+    (DSFC_ROSTER_URL) rather than nwslsoccer.com -- same rationale as
+    fetch_dsfc_schedule.
+
+    Returns a list of dicts in the same shape fetch_nwsl_roster does --
+    source_ref, name, jersey_number, position -- except jersey_number is
+    always None: this page's player cards carry a name, position and
+    headshot but no jersey number anywhere, and neither does a player's own
+    profile page linked from the card (confirmed against live snapshots on
+    2026-09-28). _sync_roster already requires both a jersey number and a
+    position to create a brand-new player row (a deliberate guard against
+    creating an unusably sparse one -- see its own docstring), so a newly
+    signed player from this source is never auto-created; an admin adds
+    them by hand with a number, same as any other field this can't source.
+    Everyone already on file keeps updating normally (name, position,
+    reactivation, deactivation), none of which depends on a number.
+
+    This module has no opponent-roster equivalent of this function:
+    _sync_opponent_rosters covers 15+ other clubs, each on a site of
+    unknown shape, and still uses fetch_nwsl_roster for all of them.
+
+    Raises SyncSourceError on any card this can't fully parse, not just
+    when none can -- same reasoning as fetch_nwsl_roster.
+    """
+    html = await _get_text(DSFC_ROSTER_URL, headers=_DSFC_HEADERS)
+
+    starts = list(_DSFC_ROSTER_CARD_RE.finditer(html))
+    if not starts:
+        raise SyncSourceError(
+            "no roster cards found on {} ({} bytes received): {}".format(
+                DSFC_ROSTER_URL, len(html), _snippet(html)
+            )
+        )
+
+    players = []
+    unparsed = 0
+    for index, card in enumerate(starts):
+        start = card.start()
+        end = starts[index + 1].start() if index + 1 < len(starts) else len(html)
+        row = html[start:end]
+
+        name_match = _DSFC_ROSTER_NAME_RE.search(row)
+        if name_match is None:
+            unparsed += 1
+            continue
+        name = "{} {}".format(name_match.group(1).strip(), name_match.group(2).strip())
+
+        position_match = _DSFC_ROSTER_POSITION_RE.search(row)
+        position_raw = position_match.group(1).strip() if position_match else ""
+
+        players.append(
+            {
+                "source_ref": card.group("href"),
+                "name": name,
+                "jersey_number": None,
+                "position": _POSITION_CODES.get(position_raw.lower(), position_raw),
+            }
+        )
+    if unparsed:
+        raise SyncSourceError(
+            "parsed {} of {} roster cards on {} -- roster page markup may have changed".format(
+                len(players), len(starts), DSFC_ROSTER_URL
+            )
+        )
+    return players
 
 
 async def fetch_wikipedia_headshot(player_name):
