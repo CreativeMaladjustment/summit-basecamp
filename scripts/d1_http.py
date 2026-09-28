@@ -108,18 +108,23 @@ class LiveD1:
         which reads groups.total_seats live inside the same transaction its
         own seat-count insert runs in, specifically to avoid a resize race).
 
-        The D1 HTTP query API has no "list of separately-parameterized
-        statements" input the way the Workers binding's .batch() does --
-        its only multi-statement form is one SQL body with statements
-        joined by ';', executed as a single implicit transaction, with one
-        shared params array whose '?' placeholders are resolved
-        positionally across the *whole* body in order. So this joins the
-        statements' own SQL with ';\\n' and flattens their individually-bound
-        params into that one list, rather than sending one API call per
-        statement (which would not be atomic at all)."""
+        The request body is a JSON *array* of {"sql", "params"} objects, one
+        per statement, each with its own independently-bound params -- not
+        one combined SQL string with a single flattened params array. An
+        earlier version of this method built exactly that combined form
+        (statements' SQL joined by ';', their params concatenated into one
+        list) on the assumption that the HTTP query API's only
+        multi-statement input was one semicolon-joined body sharing a single
+        params array; that was wrong, and broke every fixture-creation sync
+        run with a real 400 from Cloudflare: "The request is malformed:
+        params with multiple statements is not supported". The API does
+        execute multiple statements atomically in one call, but only when
+        each one is a separate object in the request body, each carrying
+        its own params -- see
+        https://developers.cloudflare.com/api/operations/cloudflare-d1-query-database
+        (the "Send multiple queries" batch form)."""
         if not statements:
             return []
-        combined_sql = ";\n".join(statement._sql for statement in statements)
-        combined_params = [param for statement in statements for param in statement._params]
-        result = _post(self._url, self._api_token, {"sql": combined_sql, "params": combined_params})
+        body = [{"sql": statement._sql, "params": list(statement._params)} for statement in statements]
+        result = _post(self._url, self._api_token, body)
         return [_RunResult((entry.get("meta") or {}).get("changes", 0) or 0) for entry in result]
