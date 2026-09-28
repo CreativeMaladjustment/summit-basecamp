@@ -8,8 +8,8 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from markup import h
-from components import badge, photo_slot, bio_links
-from data import SQUAD, POSITIONS, DENVER_ROSTER_URL
+from components import badge, photo_slot, bio_links, player_club_bio_url
+from data import SQUAD, POSITIONS
 
 
 def render():
@@ -48,7 +48,7 @@ def player_card(p):
                        "target": "_blank", "rel": "noopener noreferrer",
                        "style": {"fontFamily": "var(--font-display)", "fontWeight": "700", "fontSize": "16px"}}, p["name"])),
             h("p", {"style": {"margin": "3px 0 0", "fontSize": "12px", "fontFamily": "var(--font-mono)", "color": "var(--ink-mute)"}}, p["pos"]),
-            bio_links(p["name"], DENVER_ROSTER_URL))),
+            bio_links(p["name"], player_club_bio_url(p["name"])))),
         h("button", {"cls": "btn btn--ghost btn--block", "type": "button", "style": {"marginTop": "12px"},
                      "aria-expanded": "false", "data-role": "expand", "data-target": f'detail-{p["id"]}',
                      "data-label-open": "Scouting note", "data-label-close": "Close"}, "Scouting note"),
