@@ -24,10 +24,14 @@ install_runtime_stubs()
 import sync  # noqa: E402
 from sync_sources import (  # noqa: E402
     DENVER_SUMMIT_TEAM_ID,
+    DSFC_ROSTER_URL,
+    DSFC_SCHEDULE_URL,
     NWSL_ROSTER_URL,
     NWSL_SCHEDULE_URL,
     SyncSourceError,
     WIKIPEDIA_API,
+    fetch_dsfc_roster,
+    fetch_dsfc_schedule,
     fetch_nwsl_roster,
     fetch_nwsl_schedule,
 )
@@ -150,6 +154,97 @@ ROSTER_HTML = (
 )
 
 
+def _dsfc_roster_card(href, first, last, position_label):
+    """One player card of the real roster grid (denversummitfc.com/roster/,
+    see sync_sources.fetch_dsfc_roster), trimmed to the bits the parser
+    reads: the card's own profile link (used as source_ref) and the name/
+    position spans. No jersey number field exists anywhere on this markup
+    -- see fetch_dsfc_roster's docstring."""
+    return """
+    <a
+        href="{href}"
+        class="roster__card"
+        aria-label="View {first} {last} profile"
+        itemscope
+        itemtype="https://schema.org/Person"
+    >
+        <span class="roster__card-image">
+            <img src="https://www.denversummitfc.com/app/uploads/x.png" alt="x">
+        </span>
+        <span class="roster__card-info">
+            <h2 class="roster__card-name">
+                <span class="roster__card-first-name" itemprop="givenName">{first}</span>
+                <span class="roster__card-last-name" itemprop="familyName">{last}</span>
+            </h2>
+            <span class="roster__card-meta">
+                <span class="roster__card-position" itemprop="jobTitle">{position}</span>
+            </span>
+        </span>
+    </a>
+    """.format(href=href, first=first, last=last, position=position_label)
+
+
+DSFC_ROSTER_HTML = (
+    "<html><body><div class=\"roster__grid\">"
+    + _dsfc_roster_card("https://www.denversummitfc.com/club/roster/ada-okafor/", "Ada", "Okafor", "Forward")
+    + _dsfc_roster_card("https://www.denversummitfc.com/club/roster/new-signing/", "New", "Signing", "Midfielder")
+    + "</div></body></html>"
+)
+
+
+def _dsfc_match_block(url_slug, opponent, iso_datetime, venue, is_home=True):
+    """One <article class="schedule__match"> of the real schedule page (see
+    sync_sources.fetch_dsfc_schedule), trimmed to the bits the parser
+    reads: the home/away indicator, the kickoff <time datetime=...>, the
+    opponent name, the match's own itemprop="url", and the hidden
+    itemprop="location" Place block this reads venue from (present and
+    identical either way, unlike the visible venue markup -- see
+    _DSFC_VENUE_RE)."""
+    indicator = "home" if is_home else "away"
+    return """
+    <article class="schedule__match" itemscope itemtype="https://schema.org/SportsEvent">
+      <meta itemprop="name" content="Denver Summit FC vs {opponent}">
+      <div class="schedule__match-indicator schedule__match-indicator--{indicator}">
+        <div class="schedule__match-indicator-label">{indicator}</div>
+      </div>
+      <div class="schedule__match-header">
+        <div class="schedule__match-time-wrapper">
+          <time class="schedule__match-time" datetime="{iso_datetime}" itemprop="startDate">time</time>
+        </div>
+      </div>
+      <div class="schedule__match-details">
+        <div class="schedule__match-opponent" itemprop="competitor" itemscope itemtype="https://schema.org/SportsTeam">
+          <div class="schedule__match-opponent-label">
+            <div class="schedule__match-opponent-name" itemprop="name">
+              {opponent}
+            </div>
+          </div>
+        </div>
+        <div class="schedule__match-venue">
+          <span class="schedule__match-value">{venue}</span>
+        </div>
+      </div>
+      <meta itemprop="url" content="https://www.denversummitfc.com/matches/{url_slug}/">
+      <div itemprop="location" itemscope itemtype="https://schema.org/Place" style="display: none;">
+        <span itemprop="name">{venue}</span>
+      </div>
+    </article>
+    """.format(
+        opponent=opponent, indicator=indicator, iso_datetime=iso_datetime,
+        venue=venue, url_slug=url_slug,
+    )
+
+
+DSFC_SCHEDULE_HTML = (
+    "<html><body><div class=\"schedule__list\">"
+    + _dsfc_match_block(
+        "denver-fc-seattle-reign-fc-oct-4-2026", "Seattle Reign FC",
+        "2026-10-04T19:00:00-06:00", "Sunrise Stadium", is_home=True,
+    )
+    + "</div></body></html>"
+)
+
+
 def _wiki_pageimages_url(name):
     return WIKIPEDIA_API + "?action=query&format=json&prop=pageimages&piprop=name&titles=" + name.replace(" ", "%20")
 
@@ -176,22 +271,27 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
             position,
         )
 
-    async def test_roster_sync_inserts_new_and_updates_drifted(self):
+    async def test_roster_sync_updates_drifted_but_never_inserts_without_a_jersey_number(self):
+        # denversummitfc.com's roster cards carry no jersey number at all
+        # (see fetch_dsfc_roster's docstring) -- "New Signing" must be
+        # skipped, not inserted, while Ada Okafor's drifted position still
+        # updates normally and her existing jersey number is untouched.
         await self._seed_player()
         js.fetch.install(
-            {NWSL_ROSTER_URL: FakeFetchResponse(ROSTER_HTML)}
+            {DSFC_ROSTER_URL: FakeFetchResponse(DSFC_ROSTER_HTML)}
         )
 
         result = await sync._sync_roster(self.env)
 
-        self.assertEqual(result["inserted"], 1)
+        self.assertEqual(result["inserted"], 0)
+        self.assertEqual(result["skipped"], 1)
         self.assertEqual(result["updated"], 1)
         rows = await sync_query(self.env, "SELECT jersey_number, position, source_ref FROM roster_players WHERE id = 'plr_1'")
-        self.assertEqual(rows[0]["jersey_number"], 9)
+        self.assertEqual(rows[0]["jersey_number"], 7)
         self.assertEqual(rows[0]["position"], "FWD")
         self.assertEqual(
             rows[0]["source_ref"],
-            "https://www.nwslsoccer.com/players/aaaa1111aaaa1111aaaa1111aaaa1111/ada-okafor",
+            "https://www.denversummitfc.com/club/roster/ada-okafor/",
         )
 
     async def test_roster_sync_preserves_hand_curated_fields(self):
@@ -200,7 +300,7 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
             self.env,
             "UPDATE roster_players SET scouting_note = 'Left-footed set-piece taker' WHERE id = 'plr_1'",
         )
-        js.fetch.install({NWSL_ROSTER_URL: FakeFetchResponse(ROSTER_HTML)})
+        js.fetch.install({DSFC_ROSTER_URL: FakeFetchResponse(DSFC_ROSTER_HTML)})
 
         await sync._sync_roster(self.env)
 
@@ -215,7 +315,7 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
             VALUES ('fix_1', NULL, 'Seattle Reign FC', '2026-10-04T18:00:00-06:00', 'Old Venue', 5000)
             """,
         )
-        js.fetch.install({NWSL_SCHEDULE_URL: FakeFetchResponse(SCHEDULE_HTML)})
+        js.fetch.install({DSFC_SCHEDULE_URL: FakeFetchResponse(DSFC_SCHEDULE_HTML)})
 
         result = await sync._sync_fixtures(self.env)
 
@@ -304,7 +404,7 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_roster_sync_deactivates_players_not_on_remote_roster(self):
         await self._seed_player(name="Departed Player", jersey=99, position="DEF")
-        js.fetch.install({NWSL_ROSTER_URL: FakeFetchResponse(ROSTER_HTML)})
+        js.fetch.install({DSFC_ROSTER_URL: FakeFetchResponse(DSFC_ROSTER_HTML)})
 
         result = await sync._sync_roster(self.env)
 
@@ -315,7 +415,7 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
     async def test_roster_sync_reactivates_a_returning_player(self):
         await self._seed_player(name="Ada Okafor")
         await sync_exec(self.env, "UPDATE roster_players SET active = FALSE WHERE id = 'plr_1'")
-        js.fetch.install({NWSL_ROSTER_URL: FakeFetchResponse(ROSTER_HTML)})
+        js.fetch.install({DSFC_ROSTER_URL: FakeFetchResponse(DSFC_ROSTER_HTML)})
 
         await sync._sync_roster(self.env)
 
@@ -325,16 +425,16 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
     async def test_roster_sync_skips_insert_with_no_position_and_preserves_existing(self):
         await self._seed_player(name="Ada Okafor", position="MID")
         html = (
-            "<html><body><table><tbody>"
-            + _roster_row("aaaa1111aaaa1111aaaa1111aaaa1111", "Ada", "Okafor", "ada-okafor", 9, "")
-            + _roster_row("cccc3333cccc3333cccc3333cccc3333", "No", "Position Yet", "no-position", 21, "")
-            + "</tbody></table></body></html>"
+            "<html><body><div class=\"roster__grid\">"
+            + _dsfc_roster_card("https://www.denversummitfc.com/club/roster/ada-okafor/", "Ada", "Okafor", "")
+            + _dsfc_roster_card("https://www.denversummitfc.com/club/roster/no-position/", "No", "Position Yet", "")
+            + "</div></body></html>"
         )
-        js.fetch.install({NWSL_ROSTER_URL: FakeFetchResponse(html)})
+        js.fetch.install({DSFC_ROSTER_URL: FakeFetchResponse(html)})
 
         result = await sync._sync_roster(self.env)
 
-        self.assertEqual(result["skipped"], 1)  # "No Position Yet" never inserted
+        self.assertEqual(result["skipped"], 1)  # "No Position Yet" never inserted (also has no jersey number)
         rows = await sync_query(self.env, "SELECT position FROM roster_players WHERE id = 'plr_1'")
         self.assertEqual(rows[0]["position"], "MID")  # blank remote position didn't overwrite it
 
@@ -395,8 +495,8 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_roster_sync_picks_up_a_name_change(self):
         await self._seed_player(name="Ada Okafor")
-        await sync_exec(self.env, "UPDATE roster_players SET source_ref = 'https://www.nwslsoccer.com/players/ada-okafor' WHERE id = 'plr_1'")
-        js.fetch.install({NWSL_ROSTER_URL: FakeFetchResponse(ROSTER_HTML)})
+        await sync_exec(self.env, "UPDATE roster_players SET source_ref = 'https://www.denversummitfc.com/club/roster/ada-okafor/' WHERE id = 'plr_1'")
+        js.fetch.install({DSFC_ROSTER_URL: FakeFetchResponse(DSFC_ROSTER_HTML)})
 
         await sync._sync_roster(self.env)
 
@@ -412,7 +512,7 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
                    ('fix_b', 'grp_b', 'Seattle Reign FC', '2026-10-04T18:00:00-06:00', 'Old Venue', 6000)
             """,
         )
-        js.fetch.install({NWSL_SCHEDULE_URL: FakeFetchResponse(SCHEDULE_HTML)})
+        js.fetch.install({DSFC_SCHEDULE_URL: FakeFetchResponse(DSFC_SCHEDULE_HTML)})
 
         result = await sync._sync_fixtures(self.env)
 
@@ -431,7 +531,7 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
             VALUES ('fix_1', NULL, 'Seattle Reign FC', '2026-09-24T18:00:00-06:00', 'Old Venue', 5000)
             """,
         )
-        js.fetch.install({NWSL_SCHEDULE_URL: FakeFetchResponse(SCHEDULE_HTML)})
+        js.fetch.install({DSFC_SCHEDULE_URL: FakeFetchResponse(DSFC_SCHEDULE_HTML)})
 
         result = await sync._sync_fixtures(self.env)
 
@@ -447,12 +547,11 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
             VALUES ('fix_1', NULL, 'Seattle Reign FC', '2026-10-04T18:00:00-06:00', 'Admin-entered Venue', 5000)
             """,
         )
-        html = "<html><body>" + _season_header() + _schedule_row(
-            "1111aaaa1111aaaa1111aaaa1111aaaa", "Sunday, Oct 4", "Seattle Reign FC",
-            "bbbb2222bbbb2222bbbb2222bbbb2222", "", "denver-summit-vs-seattle-reign",
-            is_home=True, time_text="7:00 PM",
-        ) + "</body></html>"
-        js.fetch.install({NWSL_SCHEDULE_URL: FakeFetchResponse(html)})
+        html = "<html><body><div class=\"schedule__list\">" + _dsfc_match_block(
+            "denver-fc-seattle-reign-fc-oct-4-2026", "Seattle Reign FC",
+            "2026-10-04T19:00:00-06:00", "", is_home=True,
+        ) + "</div></body></html>"
+        js.fetch.install({DSFC_SCHEDULE_URL: FakeFetchResponse(html)})
 
         await sync._sync_fixtures(self.env)
 
@@ -471,12 +570,11 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
     async def test_fixture_sync_creates_a_fixture_for_an_upcoming_home_match(self):
         future = datetime.date.today() + datetime.timedelta(days=30)
         await self._seed_group(total_seats=2, season_year=future.year)
-        html = "<html><body>" + _season_header(future.year) + _schedule_row(
-            "1111aaaa1111aaaa1111aaaa1111aaaa", future.strftime("%A, %b ") + str(future.day),
-            "Angel City", "bbbb2222bbbb2222bbbb2222bbbb2222", "Centennial Stadium",
-            "denver-summit-vs-angel-city", is_home=True, time_text="7:00 PM",
-        ) + "</body></html>"
-        js.fetch.install({NWSL_SCHEDULE_URL: FakeFetchResponse(html)})
+        html = "<html><body><div class=\"schedule__list\">" + _dsfc_match_block(
+            "denver-fc-angel-city-fc", "Angel City",
+            "{}T19:00:00-06:00".format(future.isoformat()), "Centennial Stadium", is_home=True,
+        ) + "</div></body></html>"
+        js.fetch.install({DSFC_SCHEDULE_URL: FakeFetchResponse(html)})
 
         result = await sync._sync_fixtures(self.env)
 
@@ -499,12 +597,11 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
     async def test_fixture_sync_does_not_create_for_an_away_match(self):
         future = datetime.date.today() + datetime.timedelta(days=30)
         await self._seed_group(season_year=future.year)
-        html = "<html><body>" + _season_header(future.year) + _schedule_row(
-            "1111aaaa1111aaaa1111aaaa1111aaaa", future.strftime("%A, %b ") + str(future.day),
-            "Chicago Stars", "bbbb2222bbbb2222bbbb2222bbbb2222", "Some Away Venue",
-            "chicago-stars-vs-denver-summit", is_home=False, time_text="7:00 PM",
-        ) + "</body></html>"
-        js.fetch.install({NWSL_SCHEDULE_URL: FakeFetchResponse(html)})
+        html = "<html><body><div class=\"schedule__list\">" + _dsfc_match_block(
+            "chicago-stars-fc-denver-fc", "Chicago Stars",
+            "{}T19:00:00-06:00".format(future.isoformat()), "Some Away Venue", is_home=False,
+        ) + "</div></body></html>"
+        js.fetch.install({DSFC_SCHEDULE_URL: FakeFetchResponse(html)})
 
         result = await sync._sync_fixtures(self.env)
 
@@ -513,14 +610,19 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fixtures[0]["n"], 0)
 
     async def test_fixture_sync_does_not_create_for_a_match_already_played(self):
+        # denversummitfc.com's schedule page appears to list only remaining
+        # matches (see fetch_dsfc_schedule's docstring), so there is no
+        # "FINISHED" status field the way nwslsoccer.com's markup had one --
+        # what actually gates fixture creation either way is the parsed
+        # kickoff instant itself (see sync._sync_fixtures), so a match dated
+        # in the past is what this exercises.
         past = datetime.date.today() - datetime.timedelta(days=30)
         await self._seed_group(season_year=past.year)
-        html = "<html><body>" + _season_header(past.year) + _schedule_row(
-            "1111aaaa1111aaaa1111aaaa1111aaaa", past.strftime("%A, %b ") + str(past.day),
-            "Angel City", "bbbb2222bbbb2222bbbb2222bbbb2222", "Centennial Stadium",
-            "denver-summit-vs-angel-city", is_home=True, status="FINISHED",
-        ) + "</body></html>"
-        js.fetch.install({NWSL_SCHEDULE_URL: FakeFetchResponse(html)})
+        html = "<html><body><div class=\"schedule__list\">" + _dsfc_match_block(
+            "denver-fc-angel-city-fc", "Angel City",
+            "{}T19:00:00-06:00".format(past.isoformat()), "Centennial Stadium", is_home=True,
+        ) + "</div></body></html>"
+        js.fetch.install({DSFC_SCHEDULE_URL: FakeFetchResponse(html)})
 
         result = await sync._sync_fixtures(self.env)
 
@@ -538,12 +640,11 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
         # still create.
         today = datetime.date.today()
         await self._seed_group(season_year=today.year)
-        html = "<html><body>" + _season_header(today.year) + _schedule_row(
-            "1111aaaa1111aaaa1111aaaa1111aaaa", today.strftime("%A, %b ") + str(today.day),
-            "Angel City", "bbbb2222bbbb2222bbbb2222bbbb2222", "Centennial Stadium",
-            "denver-summit-vs-angel-city", is_home=True, time_text="12:01 AM",
-        ) + "</body></html>"
-        js.fetch.install({NWSL_SCHEDULE_URL: FakeFetchResponse(html)})
+        html = "<html><body><div class=\"schedule__list\">" + _dsfc_match_block(
+            "denver-fc-angel-city-fc", "Angel City",
+            "{}T00:01:00-06:00".format(today.isoformat()), "Centennial Stadium", is_home=True,
+        ) + "</div></body></html>"
+        js.fetch.install({DSFC_SCHEDULE_URL: FakeFetchResponse(html)})
 
         result = await sync._sync_fixtures(self.env)
 
@@ -554,12 +655,11 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
         # Group's season is one year off the remote match's -- a 2026
         # schedule must never populate a 2025 or 2027 syndicate's fixtures.
         await self._seed_group(season_year=future.year + 1)
-        html = "<html><body>" + _season_header(future.year) + _schedule_row(
-            "1111aaaa1111aaaa1111aaaa1111aaaa", future.strftime("%A, %b ") + str(future.day),
-            "Angel City", "bbbb2222bbbb2222bbbb2222bbbb2222", "Centennial Stadium",
-            "denver-summit-vs-angel-city", is_home=True, time_text="7:00 PM",
-        ) + "</body></html>"
-        js.fetch.install({NWSL_SCHEDULE_URL: FakeFetchResponse(html)})
+        html = "<html><body><div class=\"schedule__list\">" + _dsfc_match_block(
+            "denver-fc-angel-city-fc", "Angel City",
+            "{}T19:00:00-06:00".format(future.isoformat()), "Centennial Stadium", is_home=True,
+        ) + "</div></body></html>"
+        js.fetch.install({DSFC_SCHEDULE_URL: FakeFetchResponse(html)})
 
         result = await sync._sync_fixtures(self.env)
 
@@ -593,27 +693,103 @@ class SyncTest(unittest.IsolatedAsyncioTestCase):
         seats = await sync_query(self.env, "SELECT COUNT(*) AS n FROM seat_allocations")
         self.assertEqual(seats[0]["n"], 2)
 
-    async def test_fixture_sync_preserves_a_known_kickoff_time_when_remote_time_is_unknown(self):
-        # A match that has since finished carries no kickoff time widget
-        # (see fetch_nwsl_schedule); its synthesized midnight must not
-        # overwrite the real kickoff time a previous sync already recorded.
-        await sync_exec(
-            self.env,
-            "INSERT INTO fixtures (id, group_id, opponent, kickoff_at, venue, weighted_value_cents, source_ref) VALUES "
-            "('fix_1', NULL, 'Seattle Reign FC', '2026-10-04T19:00:00', 'Sunrise Stadium', 5000, "
-            "'https://www.nwslsoccer.com/match/1/denver-summit-vs-seattle-reign')",
+    # fetch_dsfc_schedule -- the source _sync_fixtures now uses -- always
+    # returns kickoff_time_known=True (every match on the page carries a
+    # full <time datetime=...>, see its docstring), so the "remote time is
+    # unknown" scenario fetch_nwsl_schedule's finished-match rows used to
+    # produce is no longer reachable through _sync_fixtures. sync.py's
+    # ternary that guards against it is unchanged and still correct (and
+    # still exercised for fetch_nwsl_schedule's own callers indirectly via
+    # that function's parsing tests below); what fetch_dsfc_schedule does
+    # instead when a row's <time> is missing entirely is fail the whole
+    # fetch loudly -- see test_fetch_dsfc_schedule_rejects_a_partial_parse.
+
+    async def test_fetch_dsfc_schedule_error_names_the_url_and_a_page_snippet(self):
+        html = "<html><body><p>Please enable JavaScript to view this page.</p></body></html>"
+        js.fetch.install({DSFC_SCHEDULE_URL: FakeFetchResponse(html)})
+
+        with self.assertRaises(SyncSourceError) as cm:
+            await fetch_dsfc_schedule(self.env)
+
+        message = str(cm.exception)
+        self.assertIn(DSFC_SCHEDULE_URL, message)
+        self.assertIn("Please enable JavaScript", message)
+
+    async def test_fetch_dsfc_schedule_rejects_a_partial_parse(self):
+        # A match article marker is found but its <time datetime=...> isn't
+        # (a markup change breaking just the kickoff field, not the
+        # article) must fail the whole fetch, not silently return a
+        # shorter schedule -- same reasoning as fetch_nwsl_schedule's
+        # equivalent test.
+        html = (
+            "<html><body><div class=\"schedule__list\">"
+            + _dsfc_match_block(
+                "denver-fc-seattle-reign-fc", "Seattle Reign FC",
+                "2026-10-04T19:00:00-06:00", "Sunrise Stadium", is_home=True,
+            )
+            + '<article class="schedule__match"><div class="schedule__match-indicator '
+            'schedule__match-indicator--home"></div></article>'
+            + "</div></body></html>"
         )
-        html = "<html><body>" + _season_header() + _schedule_row(
-            "1", "Sunday, Oct 4", "Seattle Reign FC",
-            "bbbb2222bbbb2222bbbb2222bbbb2222", "Sunrise Stadium", "denver-summit-vs-seattle-reign",
-            is_home=True, status="FINISHED",
-        ) + "</body></html>"
-        js.fetch.install({NWSL_SCHEDULE_URL: FakeFetchResponse(html)})
+        js.fetch.install({DSFC_SCHEDULE_URL: FakeFetchResponse(html)})
 
-        await sync._sync_fixtures(self.env)
+        with self.assertRaises(SyncSourceError):
+            await fetch_dsfc_schedule(self.env)
 
-        rows = await sync_query(self.env, "SELECT kickoff_at FROM fixtures WHERE id = 'fix_1'")
-        self.assertEqual(rows[0]["kickoff_at"], "2026-10-04T19:00:00")
+    async def test_fetch_dsfc_roster_error_names_the_url_and_a_page_snippet(self):
+        html = "<html><body><p>Please enable JavaScript to view this page.</p></body></html>"
+        js.fetch.install({DSFC_ROSTER_URL: FakeFetchResponse(html)})
+
+        with self.assertRaises(SyncSourceError) as cm:
+            await fetch_dsfc_roster(self.env)
+
+        message = str(cm.exception)
+        self.assertIn(DSFC_ROSTER_URL, message)
+        self.assertIn("Please enable JavaScript", message)
+
+    async def test_fetch_dsfc_roster_rejects_a_partial_parse(self):
+        html = (
+            "<html><body><div class=\"roster__grid\">"
+            + _dsfc_roster_card("https://www.denversummitfc.com/club/roster/ada-okafor/", "Ada", "Okafor", "Forward")
+            + '<a href="https://www.denversummitfc.com/club/roster/broken/" class="roster__card"></a>'
+            + "</div></body></html>"
+        )
+        js.fetch.install({DSFC_ROSTER_URL: FakeFetchResponse(html)})
+
+        with self.assertRaises(SyncSourceError):
+            await fetch_dsfc_roster(self.env)
+
+    async def test_fetch_dsfc_roster_returns_no_jersey_number(self):
+        js.fetch.install({DSFC_ROSTER_URL: FakeFetchResponse(DSFC_ROSTER_HTML)})
+
+        players = await fetch_dsfc_roster(self.env)
+
+        self.assertEqual(len(players), 2)
+        for player in players:
+            self.assertIsNone(player["jersey_number"])
+        self.assertEqual(players[0]["name"], "Ada Okafor")
+        self.assertEqual(players[0]["position"], "FWD")
+        self.assertEqual(players[0]["source_ref"], "https://www.denversummitfc.com/club/roster/ada-okafor/")
+
+    async def test_fetch_dsfc_schedule_reads_home_and_away_correctly(self):
+        html = "<html><body><div class=\"schedule__list\">" + _dsfc_match_block(
+            "denver-fc-seattle-reign-fc", "Seattle Reign FC",
+            "2026-10-04T19:00:00-06:00", "Sunrise Stadium", is_home=True,
+        ) + _dsfc_match_block(
+            "chicago-stars-fc-denver-fc", "Chicago Stars",
+            "2026-10-17T18:45:00-06:00", "Some Away Venue", is_home=False,
+        ) + "</div></body></html>"
+        js.fetch.install({DSFC_SCHEDULE_URL: FakeFetchResponse(html)})
+
+        fixtures = await fetch_dsfc_schedule(self.env)
+
+        self.assertEqual(len(fixtures), 2)
+        self.assertTrue(fixtures[0]["is_home"])
+        self.assertEqual(fixtures[0]["kickoff_at"], "2026-10-04T19:00:00")
+        self.assertEqual(fixtures[0]["venue"], "Sunrise Stadium")
+        self.assertIsNone(fixtures[0]["opponent_team_id"])
+        self.assertFalse(fixtures[1]["is_home"])
+        self.assertEqual(fixtures[1]["opponent"], "Chicago Stars")
 
     async def test_fetch_nwsl_schedule_rejects_a_row_missing_denver_team_id(self):
         # Both sides present, but neither is Denver Summit's own team id --

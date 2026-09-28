@@ -43,7 +43,7 @@ profile picture is nowhere near KV's 25 MiB per-value limit.
 | `src/splits.py` | Expense-split and settle-up arithmetic |
 | `src/responses.py` | JSON responses, `ApiError`, and `binary_response` for a non-JSON body (an avatar) |
 | `src/sync.py` | Roster/fixture/opponent/headshot sync: diffs external data against D1 and writes what drifted -- runs from GitHub Actions, not the Worker (see below) |
-| `src/sync_sources.py` | Fetching and parsing for the NWSL and Wikipedia sources `sync.py` reconciles against |
+| `src/sync_sources.py` | Fetching and parsing for the denversummitfc.com, nwslsoccer.com, and Wikipedia sources `sync.py` reconciles against |
 | `scripts/run_sync.py` | Entry point that runs `sync.py` from a GitHub Actions runner |
 | `scripts/d1_http.py` | A `env.DB`-shaped stand-in backed by Cloudflare's D1 HTTP API, for `sync.py` to write through outside the Worker |
 | `scripts/live_js_stubs.py` | Real `js.fetch`/`pyodide.ffi` stand-ins, for `sync_sources.py` to run under plain Python outside the Worker |
@@ -337,37 +337,73 @@ on the deployed Worker (`POST /api/admin/sync`). It now runs as a GitHub
 Actions workflow that doesn't touch the Worker at all --
 `.github/workflows/sync-roster.yml` runs `scripts/run_sync.py` directly on
 the runner, on the same weekly schedule plus every successful deploy to
-main. That trade happened for a specific reason, not just for logs living
-in GitHub Actions: a Cloudflare Worker's own `fetch()` to an external site
-like nwslsoccer.com originates from Cloudflare's edge IP space, one of the
-most commonly bot-fingerprinted network ranges on the internet, so a scrape
-that fails from inside the Worker can simply succeed from a GitHub-hosted
-runner on an unrelated network. `scripts/run_sync.py` installs real
-`js`/`pyodide.ffi` stand-ins (`scripts/live_js_stubs.py`, real `fetch()`
-instead of the Workers one) before importing `sync.py`/`sync_sources.py`
-completely unchanged, and gives `env.DB` a stand-in backed by Cloudflare's
-D1 HTTP API (`scripts/d1_http.py`) instead of the Workers binding
-`src/db.py` otherwise targets -- so nothing in the sync logic itself needed
-to know it moved. Authenticated the same way `deploy.yml`'s own D1
-migrations step already is: the `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID`
-secrets already in the `sb` GitHub environment, no separate credential of
-its own -- and so no Worker secret to revoke if this repo's access is ever
-compromised, unlike the admin-endpoint approach it replaced.
+main. `scripts/run_sync.py` installs real `js`/`pyodide.ffi` stand-ins
+(`scripts/live_js_stubs.py`, real `fetch()` instead of the Workers one)
+before importing `sync.py`/`sync_sources.py` completely unchanged, and gives
+`env.DB` a stand-in backed by Cloudflare's D1 HTTP API (`scripts/d1_http.py`)
+instead of the Workers binding `src/db.py` otherwise targets -- so nothing
+in the sync logic itself needed to know it moved. Authenticated the same
+way `deploy.yml`'s own D1 migrations step already is: the
+`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` secrets already in the `sb`
+GitHub environment, no separate credential of its own -- and so no Worker
+secret to revoke if this repo's access is ever compromised, unlike the
+admin-endpoint approach it replaced.
+
+This move was originally motivated by a theory that a Cloudflare Worker's
+own `fetch()` to an external site originates from Cloudflare's edge IP
+space, one of the most commonly bot-fingerprinted network ranges on the
+internet, and that a scrape failing from inside the Worker might simply
+succeed from a GitHub-hosted runner on an unrelated network. **That theory
+was tested and disproven on 2026-09-27**: a real GitHub Actions run hit
+nwslsoccer.com's roster and schedule pages and got the exact same empty
+result the Worker did. The real cause turned out to be unrelated to which
+network does the fetching -- see the next section. The move to GitHub
+Actions stayed anyway, on its own merits (no Worker admin endpoint or its
+secret to expose/revoke, logs live where the workflow ran), but it does not
+fix a scraper on its own.
 
 ### Roster/fixture/opponent/headshot sync
 
-`src/sync.py` runs five independent jobs: roster and fixture facts from
-nwslsoccer.com's Denver Summit team page, opponent facts and rosters from
-the same site's pages for the other 15 NWSL clubs, and player headshots
-from Wikipedia's API, filtered to CC0/CC-BY/public-domain licenses only.
-Neither the schedule page nor a roster page (Denver Summit's or any other
-club's -- they share the same page template) renders JSON-LD (both were
-assumed to; verified against real snapshots of both on 2026-09-21/22 that
-neither does) -- both are plain server-rendered markup (a match-list widget
-and a roster table), so every job that touches either scrapes that markup
-directly. See `src/sync_sources.py` for both parsers, and what happens if either page's
-markup changes -- each raises rather than returning a partial result if
-even one row fails to parse, since a shorter-but-nonempty result would
+`src/sync.py` runs five independent jobs, sourced from two different sites:
+
+- **Denver Summit's own roster and fixtures** (`_sync_roster`,
+  `_sync_fixtures`) come from **denversummitfc.com**
+  (`fetch_dsfc_roster`/`fetch_dsfc_schedule` in `src/sync_sources.py`), not
+  nwslsoccer.com. As of 2026-09-27, nwslsoccer.com's team pages (both the
+  schedule and roster tabs, verified against real snapshots) hydrate
+  entirely client-side -- a plain `fetch()` gets zero player or match data
+  from either, whether it runs from the Worker or a GitHub Actions runner
+  (see above). denversummitfc.com is still a plain server-rendered
+  WordPress site with `schema.org` microdata per match/player, confirmed
+  against live snapshots on 2026-09-28. It does 403 a request carrying only
+  a bare `User-Agent: Mozilla/5.0` (a naive bot-header check, not an IP
+  block -- the same request succeeds from the same runner once a full
+  browser-like header set is sent, see `_DSFC_HEADERS` in
+  `sync_sources.py`), which both DSFC fetch functions send. One real gap:
+  its roster cards carry no jersey number anywhere (checked both the
+  listing card and a player's own profile page) -- `_sync_roster` already
+  requires one to create a brand-new player row, so a new signing updates
+  once an admin has created their row by hand with a number, but is never
+  auto-created from this source alone.
+- **Every other opponent's dates and rosters** (`_sync_opponents`,
+  `_sync_opponent_rosters`, covering the other 15 NWSL clubs) still come
+  from **nwslsoccer.com** (`fetch_nwsl_schedule`/`fetch_nwsl_roster`), which
+  is why those two jobs are still broken pending either a per-club
+  denversummitfc.com-style source (unlikely -- 15 different clubs, 15
+  different sites) or some other fix. They were not switched to the DSFC
+  functions because `_sync_opponents` matches a club's dossier by
+  nwslsoccer.com's own stable team id, read off the schedule page as a
+  byproduct of parsing fixtures (`fetch_nwsl_schedule`'s
+  `opponent_team_id`); denversummitfc.com's schedule has no such id for the
+  opposing club, so switching this job too would overwrite every already-
+  matched opponent's `source_ref` with `NULL` on the very next run instead
+  of just leaving it unable to set a new one. Player headshots
+  (`_sync_headshots`) are unaffected by any of this -- they come from
+  Wikipedia's API, filtered to CC0/CC-BY/public-domain licenses only.
+
+See `src/sync_sources.py` for all four scrapers, and what happens if any
+page's markup changes -- each raises rather than returning a partial result
+if even one row fails to parse, since a shorter-but-nonempty result would
 otherwise look like a clean, smaller roster/schedule instead of a broken
 scraper. Existing rows are matched by `source_ref` (falling back to a name
 match the first time) and only the fields that drifted are written, so
