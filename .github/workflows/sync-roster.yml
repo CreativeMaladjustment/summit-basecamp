@@ -85,5 +85,5 @@ jobs:
           if [[ $(git status -s) ]]; then
             git add web/build_src/data.py web/index.html
             git commit -m "Update opponent rosters from sync"
-            git push
+            git push origin HEAD:main
           fi
