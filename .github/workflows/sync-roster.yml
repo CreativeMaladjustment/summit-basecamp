@@ -39,7 +39,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   # One sync at a time; never cancel one already in flight -- a half-run
@@ -68,3 +68,22 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: python3 scripts/run_sync.py
+
+      - name: Export opponent data to data.py
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: python3 scripts/export_opponents_data.py
+
+      - name: Rebuild static HTML
+        run: python3 web/build_src/build.py
+
+      - name: Commit and push updated data
+        run: |
+          git config user.name "Sync Bot"
+          git config user.email "noreply@anthropic.com"
+          if [[ $(git status -s) ]]; then
+            git add web/build_src/data.py web/index.html
+            git commit -m "Update opponent rosters from sync"
+            git push
+          fi
