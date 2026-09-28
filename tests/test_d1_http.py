@@ -118,7 +118,12 @@ class D1HttpTests(unittest.TestCase):
             asyncio.run(db.prepare("NOT VALID SQL").all())
         self.assertIn("bad sql", str(cm.exception))
 
-    def test_batch_joins_statements_and_flattens_params_in_order(self):
+    def test_batch_sends_one_object_per_statement_with_its_own_params(self):
+        # A real Cloudflare D1 400 ("params with multiple statements is not
+        # supported") proved the request body must be a JSON array of
+        # {sql, params} objects, one per statement -- not one semicolon-
+        # joined SQL string sharing a single flattened params array (what
+        # this method sent before, and the exact shape that 400 rejected).
         self._install_response(200, {
             "success": True,
             "result": [{"meta": {"changes": 1}}, {"meta": {"changes": 4}}],
@@ -136,11 +141,12 @@ class D1HttpTests(unittest.TestCase):
         self.assertEqual([r.meta.changes for r in results], [1, 4])
         body = json.loads(self.captured_requests[0].data)
         self.assertEqual(
-            body["sql"],
-            "INSERT INTO fixtures (id, opponent) VALUES (?, ?);\n"
-            "INSERT INTO seat_allocations (fixture_id, seat_number) VALUES (?, ?)",
+            body,
+            [
+                {"sql": "INSERT INTO fixtures (id, opponent) VALUES (?, ?)", "params": ["fix_1", "Reign"]},
+                {"sql": "INSERT INTO seat_allocations (fixture_id, seat_number) VALUES (?, ?)", "params": ["fix_1", 1]},
+            ],
         )
-        self.assertEqual(body["params"], ["fix_1", "Reign", "fix_1", 1])
 
     def test_batch_of_nothing_makes_no_request(self):
         db = LiveD1("acct_1", "db_1", "tok_1")
