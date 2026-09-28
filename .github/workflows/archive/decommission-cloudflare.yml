@@ -9,11 +9,13 @@ name: Decommission old Cloudflare resources
 # Run this only after:
 #   1. The new Worker/Pages project has actually deployed and been checked
 #      (GET /api/health for the Worker; load the new Pages URL).
-#   2. The CF_API_BASE_URL repository variable (read by
-#      .github/workflows/sync-roster.yml) has been updated to the new
-#      Worker's hostname. Deleting the old Worker before that breaks the
-#      next scheduled sync with no visible error until it fails to run --
-#      POST /api/admin/sync would be calling a Worker that no longer exists.
+#   2. web/src/app.js's own hardcoded API_BASE has been updated to the new
+#      Worker's hostname (see docs/deploy.md's rename checklist) -- deleting
+#      the old Worker before that breaks every real request the deployed
+#      frontend makes, with no visible error until it does. The
+#      roster/fixture/opponent/headshot sync no longer runs through the
+#      Worker at all (see .github/workflows/sync-roster.yml), so it isn't
+#      at risk here either way.
 #
 # Uses the Cloudflare API directly (not `wrangler delete`) so the exact
 # outcome can be checked from the response's own "success" field rather

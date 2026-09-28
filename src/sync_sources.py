@@ -92,9 +92,9 @@ _DIAGNOSTIC_LANDMARKS = (
 def _snippet(html, limit=1500):
     """A bounded preview of a page that fetched fine but didn't contain what
     a selector expected -- attached to the resulting SyncSourceError so it
-    shows up in the GitHub Actions job summary (POST /api/admin/sync's own
-    response body, see docs/backend.md) without needing a browser that can
-    actually reach nwslsoccer.com to see what changed.
+    shows up directly in scripts/run_sync.py's own printed output (and its
+    GitHub Actions job summary, see docs/backend.md) without needing a
+    browser that can actually reach nwslsoccer.com to see what changed.
 
     A real snapshot of the roster page turned out to be ~200 KB -- a plain
     head-of-document prefix landed entirely inside the <head>'s font/CSS/JS

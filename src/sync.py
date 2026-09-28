@@ -1,8 +1,9 @@
 """Reconcile roster, fixture, opponent and headshot data against external
 sources.
 
-Run via POST /api/admin/sync (src/handlers.trigger_sync), triggered by
-.github/workflows/sync-roster.yml -- not a Worker cron; see that file and
+Run via scripts/run_sync.py, invoked directly from a GitHub Actions runner
+by .github/workflows/sync-roster.yml -- not a Worker cron, and not through
+the deployed Worker either; see that file, scripts/run_sync.py and
 docs/backend.md for why. Each job below fetches its source through
 sync_sources, matches what it got against the existing rows, and writes
 only what drifted -- existing rows

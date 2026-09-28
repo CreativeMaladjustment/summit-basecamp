@@ -32,9 +32,8 @@ DEVICE_TRUST_TTL_SECONDS = 60 * 60 * 24 * 30
 def verify_site_password(env, password):
     """Raise ApiError unless ``password`` matches the SITE_PWD Worker secret.
 
-    Constant-time compare (see trigger_sync's SYNC_ADMIN_TOKEN check for the
-    same pattern) -- a naive == would let a timing attack narrow the shared
-    password down a character at a time.
+    Constant-time compare -- a naive == would let a timing attack narrow the
+    shared password down a character at a time.
     """
     expected = getattr(env, "SITE_PWD", None)
     if not expected:

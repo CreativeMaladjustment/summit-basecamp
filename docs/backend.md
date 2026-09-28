@@ -36,15 +36,18 @@ profile picture is nowhere near KV's 25 MiB per-value limit.
 | `seed/opponents_seed.sql` | All 15 real opponent dossiers, safe to run against production -- **not** just an optional bootstrap like the other two seeds; the sync job never creates an opponent row from nothing, only updates ones this file (or an equivalent) already put there. Idempotent (`INSERT ... ON CONFLICT DO UPDATE`, never a DELETE), so rerunning it -- to add a club or fix a typo -- never wipes sync-owned `opponent_players` rows or an admin's hand-edited `form`/`shape_note` |
 | `src/entry.py` | `on_fetch` route table, `on_scheduled` cron jobs |
 | `src/router.py` | Path matching (`/api/groups/{group_id}/fixtures`) |
-| `src/handlers.py` | One function per endpoint, including admin-only `trigger_sync` |
+| `src/handlers.py` | One function per endpoint |
 | `src/db.py` | D1 helpers that hand back plain dicts |
 | `src/storage.py` | KV helpers for the `AVATARS` namespace (member profile pictures) |
 | `src/auth.py` | Bearer token to user, membership and admin checks |
 | `src/splits.py` | Expense-split and settle-up arithmetic |
 | `src/responses.py` | JSON responses, `ApiError`, and `binary_response` for a non-JSON body (an avatar) |
-| `src/sync.py` | Roster/fixture/opponent/headshot sync: diffs external data against D1 and writes what drifted |
+| `src/sync.py` | Roster/fixture/opponent/headshot sync: diffs external data against D1 and writes what drifted -- runs from GitHub Actions, not the Worker (see below) |
 | `src/sync_sources.py` | Fetching and parsing for the NWSL and Wikipedia sources `sync.py` reconciles against |
-| `.github/workflows/sync-roster.yml` | Triggers the sync via `POST /api/admin/sync`, on deploy and on a weekly schedule |
+| `scripts/run_sync.py` | Entry point that runs `sync.py` from a GitHub Actions runner |
+| `scripts/d1_http.py` | A `env.DB`-shaped stand-in backed by Cloudflare's D1 HTTP API, for `sync.py` to write through outside the Worker |
+| `scripts/live_js_stubs.py` | Real `js.fetch`/`pyodide.ffi` stand-ins, for `sync_sources.py` to run under plain Python outside the Worker |
+| `.github/workflows/sync-roster.yml` | Runs `scripts/run_sync.py`, on deploy and on a weekly schedule |
 
 ## Running it
 
@@ -222,8 +225,9 @@ There is no per-person auth. Sign-in is a shared-password gate over six fixed
 guest slots (`usr_guest1`..`usr_guest6`, seeded by migration `0010`): everyone
 types the same `SITE_PWD` Worker secret and picks which slot they are.
 `POST /api/auth/session` (`src/handlers.begin_session`) checks the password
-with `hmac.compare_digest` (same constant-time pattern as `trigger_sync`'s
-`SYNC_ADMIN_TOKEN` check) via `src/auth.verify_site_password`, then mints a
+with `hmac.compare_digest` (a constant-time comparison, so a naive `==`
+can't be used to narrow the password down a character at a time) via
+`src/auth.verify_site_password`, then mints a
 session token (`src/auth.start_session`, 64 bytes from `secrets`) and writes
 `session:<token>` into the `SESSIONS` KV namespace with a 30-day TTL -- the
 write side of `_user_id_from_request`'s read. `GET /api/auth/guests` lists
@@ -249,9 +253,9 @@ lets whoever is signed into a slot replace that with their own name from
 Campfire Settings, which then sticks for that slot going forward; nothing
 about the endpoint ties it to sign-in time specifically.
 
-Set `SITE_PWD` once as a secret in the `sb` GitHub environment; like
-`CF_SYNC_ADMIN_TOKEN`, deploy.yml's "Set SITE_PWD secret" step pushes it to
-the Worker on every deploy, no local `wrangler secret put` needed. Never set,
+Set `SITE_PWD` once as a secret in the `sb` GitHub environment; deploy.yml's
+"Set SITE_PWD secret" step pushes it to the Worker on every deploy, no local
+`wrangler secret put` needed. Never set,
 `POST /api/auth/session` refuses every call with 503 rather than falling
 open. Removing the GitHub secret later doesn't just stop future pushes --
 a Worker secret persists on Cloudflare independently of GitHub, so deploy.yml's
@@ -328,20 +332,27 @@ payer's own share is not written, since nobody owes themselves.
 | `0 10 * * *` | Find seats still on the bench three days before kickoff |
 
 The roster/fixture/headshot sync used to be a third Worker cron here
-(`0 5 * * 1`). It now runs as a GitHub Actions workflow instead --
-`.github/workflows/sync-roster.yml`, on the same weekly schedule plus every
-successful deploy to main -- calling `POST /api/admin/sync`
-(`src/handlers.trigger_sync`) rather than being invoked by
-`on_scheduled`. That trades the "stays behind the existing D1 binding, no
-second deployment path" argument for a run's logs and history living in
-GitHub Actions with everything else in this repo, and for a sync firing
-right after the code or data that feeds it changes rather than waiting up
-to a week for the next cron tick. The admin endpoint is authenticated by a
-shared-secret bearer token (`SYNC_ADMIN_TOKEN` on the Worker), not a
-signed-in user. Set it once as the `CF_SYNC_ADMIN_TOKEN` secret in the
-`sb` GitHub environment -- deploy.yml's "Set SYNC_ADMIN_TOKEN secret" step
-pushes that value to the Worker on every deploy, so there is no
-`wrangler secret put` to run by hand.
+(`0 5 * * 1`), then a GitHub Actions workflow that called an admin endpoint
+on the deployed Worker (`POST /api/admin/sync`). It now runs as a GitHub
+Actions workflow that doesn't touch the Worker at all --
+`.github/workflows/sync-roster.yml` runs `scripts/run_sync.py` directly on
+the runner, on the same weekly schedule plus every successful deploy to
+main. That trade happened for a specific reason, not just for logs living
+in GitHub Actions: a Cloudflare Worker's own `fetch()` to an external site
+like nwslsoccer.com originates from Cloudflare's edge IP space, one of the
+most commonly bot-fingerprinted network ranges on the internet, so a scrape
+that fails from inside the Worker can simply succeed from a GitHub-hosted
+runner on an unrelated network. `scripts/run_sync.py` installs real
+`js`/`pyodide.ffi` stand-ins (`scripts/live_js_stubs.py`, real `fetch()`
+instead of the Workers one) before importing `sync.py`/`sync_sources.py`
+completely unchanged, and gives `env.DB` a stand-in backed by Cloudflare's
+D1 HTTP API (`scripts/d1_http.py`) instead of the Workers binding
+`src/db.py` otherwise targets -- so nothing in the sync logic itself needed
+to know it moved. Authenticated the same way `deploy.yml`'s own D1
+migrations step already is: the `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID`
+secrets already in the `sb` GitHub environment, no separate credential of
+its own -- and so no Worker secret to revoke if this repo's access is ever
+compromised, unlike the admin-endpoint approach it replaced.
 
 ### Roster/fixture/opponent/headshot sync
 
@@ -457,9 +468,8 @@ wrongly-skipped one just never appears at all.
   "Find your syndicate," Settings, the header, Matchday, the 14er Pass, the
   Bench and the 14ers ledger -- is wired to this API at runtime by
   `web/src/app.js`'s `paintRealSyndicateDetail`/`paintRealFixtures`, using
-  `API_BASE` (hardcoded to the Worker's own hostname -- update it by hand
-  the same way `CF_API_BASE_URL` already needs updating on a Worker rename,
-  see `docs/deploy.md`). Home Team (`GET /api/roster`) and Visitors
+  `API_BASE` (hardcoded to the Worker's own hostname -- update it by hand on
+  a Worker rename, see `docs/deploy.md`). Home Team (`GET /api/roster`) and Visitors
   (`GET /api/opponents`) are the two screens left rendering
   `web/build_src/data.py`'s placeholder roster/opponent content instead.
 
