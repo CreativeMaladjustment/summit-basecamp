@@ -61,6 +61,7 @@ from sync_sources import (
     fetch_nwsl_roster,
     fetch_nwsl_schedule,
     fetch_wikipedia_headshot,
+    fetch_wikipedia_roster,
 )
 
 # How far a fixture's remote kickoff date may drift from what's on file and
@@ -208,31 +209,24 @@ async def _sync_opponent_rosters(env):
     columns, and stringly-built SQL to paper over that is worse than the
     duplication).
 
-    An opponent only gets fetched once both opponents.source_ref (its
-    nwslsoccer.com team id, set by _sync_opponents) and
-    opponents.source_slug (that club's own roster-page slug -- see
-    migrations/0006_opponent_sync.sql) are on file; one missing either is
-    silently left alone, not an error, since there is nothing to fetch yet
-    rather than something that failed. A club added to seed/opponents_seed.sql
-    without a verified slug (or a slug that turns out wrong) shows up as a
-    SyncSourceError for just that club in the returned per-club results,
-    the same safety net fetch_nwsl_roster's other callers rely on -- see
-    docs/backend.md.
+    Opponent rosters are now fetched from Wikipedia instead of nwslsoccer.com,
+    which requires session tokens for schedule/roster data. The Wikipedia
+    approach is more stable and doesn't depend on NWSL's dynamic markup.
+    An opponent only gets fetched once opponents.club (the club name) is on file;
+    the club name must match a key in sync_sources.WIKIPEDIA_TEAM_PAGES or the
+    sync will fail for that club.
     """
-    opponents = await query(env, "SELECT id, club, source_ref, source_slug FROM opponents")
-    tracked = [row for row in opponents if row["source_ref"] and row["source_slug"]]
+    opponents = await query(env, "SELECT id, club FROM opponents")
 
     results = {}
-    for opponent in tracked:
+    for opponent in opponents:
         try:
-            remote_players = await fetch_nwsl_roster(
-                env, team_id=opponent["source_ref"], team_slug=opponent["source_slug"]
-            )
+            remote_players = await fetch_wikipedia_roster(opponent["club"])
         except SyncSourceError as error:
             results[opponent["club"]] = {"error": str(error)}
             continue
         results[opponent["club"]] = await _sync_one_opponent_roster(env, opponent["id"], remote_players)
-    return {"tracked": len(tracked), "clubs": results}
+    return {"tracked": len(opponents), "clubs": results}
 
 
 async def _sync_one_opponent_roster(env, opponent_id, remote_players):
