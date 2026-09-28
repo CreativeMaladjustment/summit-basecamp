@@ -146,3 +146,28 @@ jobs:
                   print()
 
           probe_player_page("https://www.denversummitfc.com/club/roster/naomi-eto/")
+
+          # Print every schedule__match article's indicator + opponent name,
+          # to confirm the home-game markup looks like the away one and see
+          # a "home" indicator example (only an away one seen so far).
+          def probe_all_matches(url):
+              print("=" * 70)
+              print(url, "-- all match indicators")
+              print("=" * 70)
+              req = urllib.request.Request(url, headers=HEADERS)
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  html = resp.read().decode("utf-8", "replace")
+              starts = [m.start() for m in re.finditer(r'<article class="schedule__match', html)]
+              for i, start in enumerate(starts):
+                  end = starts[i + 1] if i + 1 < len(starts) else len(html)
+                  block = html[start:end]
+                  indicator = re.search(r'schedule__match-indicator--(\w+)', block)
+                  opponent = re.search(r'schedule__match-opponent-name"\s*itemprop="name">\s*([^<]+?)\s*</div>', block)
+                  dt = re.search(r'datetime="([^"]+)"', block)
+                  venue = re.search(r'schedule__match-venue">\s*<span class="schedule__match-value">([^<]*)</span>', block)
+                  print(i, "indicator=", indicator.group(1) if indicator else None,
+                        "opponent=", opponent.group(1) if opponent else None,
+                        "datetime=", dt.group(1) if dt else None,
+                        "venue=", venue.group(1) if venue else None)
+
+          probe_all_matches("https://www.denversummitfc.com/schedule/")
