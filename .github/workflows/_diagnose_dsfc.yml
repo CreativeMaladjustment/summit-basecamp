@@ -49,7 +49,7 @@ jobs:
               "Accept-Language": "en-US,en;q=0.9",
           }
 
-          def probe(url):
+          def probe(url, article_marker=None):
               print("=" * 70)
               print(url)
               print("=" * 70)
@@ -70,22 +70,53 @@ jobs:
                   return
               print("HTTP", status, "-", len(html), "bytes")
 
-              found_any = False
-              for landmark in LANDMARKS:
-                  idx = html.lower().find(landmark.lower())
-                  if idx == -1:
-                      continue
-                  found_any = True
-                  window = html[max(0, idx - 300):idx + 900]
-                  collapsed = re.sub(r"\s+", " ", window).strip()
-                  print("---", repr(landmark), "at offset", idx, "---")
-                  print(collapsed)
-                  print()
-              if not found_any:
-                  collapsed = re.sub(r"\s+", " ", html).strip()
-                  print("NO LANDMARKS FOUND. Head of document:")
-                  print(collapsed[:3000])
+              # We already know these pages are server-rendered (previous
+              # run). Now print full repeating item blocks so we can see
+              # the actual structure to write a real parser against,
+              # instead of just a landmark's surrounding context.
+              if article_marker:
+                  count = html.count(article_marker)
+                  print("count of %r:" % article_marker, count)
+                  first = html.find(article_marker)
+                  second = html.find(article_marker, first + 1)
+                  if first != -1 and second != -1:
+                      block = html[first:second]
+                      print("--- first full block (%d chars) ---" % len(block))
+                      print(block)
+                  elif first != -1:
+                      print("--- only one match, next 4000 chars from it ---")
+                      print(html[first:first + 4000])
+                  else:
+                      print("marker not found at all")
               print()
 
-          probe("https://www.denversummitfc.com/schedule/")
-          probe("https://www.denversummitfc.com/roster/")
+          probe("https://www.denversummitfc.com/schedule/", article_marker='<article class="schedule__match')
+
+          # Roster page: we don't know the repeating player-card class yet.
+          # Scan for likely WP-theme naming patterns and dump a window
+          # around whichever shows up, past the header/nav boilerplate.
+          ROSTER_CANDIDATES = (
+              "roster__grid", "roster__list", "roster__card", "roster__item",
+              "roster__player", "player-card", "player__card", "player__item",
+              "team-member", "athlete-card", "jersey-number", "data-number",
+              "wp-block-query", "wp-block-post-template", "headshot",
+          )
+
+          def probe_roster(url):
+              print("=" * 70)
+              print(url)
+              print("=" * 70)
+              req = urllib.request.Request(url, headers=HEADERS)
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  html = resp.read().decode("utf-8", "replace")
+              print("HTTP", resp.status, "-", len(html), "bytes")
+              for candidate in ROSTER_CANDIDATES:
+                  idx = html.lower().find(candidate.lower())
+                  if idx == -1:
+                      continue
+                  window = html[max(0, idx - 200):idx + 2500]
+                  print("--- %r found at offset %d ---" % (candidate, idx))
+                  print(window)
+                  print()
+
+          probe_roster("https://www.denversummitfc.com/roster/")
