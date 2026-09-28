@@ -5,6 +5,7 @@ visible. Tilts stay under 0.6deg and nothing animates, per the design brief.
 from __future__ import annotations
 
 import sys, os
+from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from markup import h
@@ -14,27 +15,48 @@ from data import OPPONENTS
 CONCRETE = "repeating-linear-gradient(180deg, rgba(120,113,108,.07) 0 38px, rgba(120,113,108,.12) 38px 39px)"
 
 
+def _parse_date(date_str):
+    """Parse date string 'M/D' to date object for current year."""
+    try:
+        month, day = map(int, date_str.split('/'))
+        return datetime(2026, month, day).date()
+    except (ValueError, AttributeError):
+        return None
+
+
+def _get_upcoming_opponents():
+    """Filter opponents to only show upcoming games (away_date in future)."""
+    today = datetime.now().date()
+    upcoming = []
+    for op in OPPONENTS:
+        away_date = _parse_date(op["away_date"])
+        if away_date and away_date >= today:
+            upcoming.append(op)
+    return upcoming if upcoming else OPPONENTS
+
+
 def render():
+    upcoming = _get_upcoming_opponents()
     return h(
         "div", {"cls": "view shell", "style": {"paddingTop": "16px"}, "data-tab": "visitors"},
-        room(),
+        room(upcoming),
         h("div", {"style": {"marginTop": "14px"}, "cls": "scroll-row", "role": "tablist"},
           [h("button", {"cls": "chip chip--stone", "type": "button", "role": "tab",
                         "aria-selected": "true" if i == 0 else "false",
                         "data-role": "opponent", "data-value": op["id"]}, op["chip"])
-           for i, op in enumerate(OPPONENTS)]),
+           for i, op in enumerate(upcoming)]),
         [h("div", {"data-opponent-block": op["id"], "hidden": i != 0}, dossier(op))
-         for i, op in enumerate(OPPONENTS)],
+         for i, op in enumerate(upcoming)],
     )
 
 
-def room():
+def room(opponents):
     rows = [h("div", {"style": {"display": "flex", "justifyContent": "space-between", "gap": "10px",
                                   "padding": "7px 0", "borderBottom": "1px solid var(--hairline)", "fontSize": "13px"}},
               h("span", {"style": {"fontWeight": "600"}}, op["club"]),
               h("span", {"style": {"fontFamily": "var(--font-mono)", "color": "var(--ink-mute)", "textAlign": "right"}},
                 f'HOME {op["home_date"]} · AWAY {op["away_date"]}'))
-             for op in OPPONENTS]
+             for op in opponents]
 
     return h(
         "section", {"style": {"borderRadius": "var(--radius-lg)", "border": "1px solid var(--hairline-strong)",
