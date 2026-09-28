@@ -1647,6 +1647,18 @@ async function paintVisitors() {
     return;
   }
 
+  opponents = opponents.map((op) => ({
+    ...op,
+    players: (op.players || []).map((p) => ({
+      id: p.id,
+      num: p.jersey_number || p.num,
+      name: p.name,
+      pos: p.position || p.pos,
+      danger: p.is_danger || p.danger,
+      note: p.scouting_note || p.note || '',
+    })),
+  }));
+
   opponents = filterUpcomingHomeGames(opponents);
   visitorsOpponentsCache = opponents;
 
