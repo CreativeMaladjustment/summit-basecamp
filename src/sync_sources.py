@@ -719,7 +719,8 @@ async def fetch_wikipedia_roster(club_name):
         )
 
     url = "https://en.wikipedia.org/wiki/{}".format(page_title)
-    html = await _get_text(url)
+    headers = {"User-Agent": WIKIPEDIA_USER_AGENT}
+    html = await _get_text(url, headers)
 
     # Look for a squad/roster table. Wikipedia typically uses wikitable class.
     # Tables usually have columns: No., Name, Position, etc.
