@@ -142,10 +142,23 @@ INSERT INTO opponents (id, club, chip_label, home_date, away_date, away_venue, f
     ('op_utahroyals', 'Utah Royals', 'Utah Royals · 8/8', '8/8', '5/23', 'America First Field', NULL, NULL, 'Most recent meeting (8/8): Denver won 2-1 at home.', '[]', 13, 'acffc559cf7d485a9c05fa23ab57054b', 'utah-royals-fc', 'https://www.nwslsoccer.com/match/2ab2e7dd4fbb4a52898ea09d1f99cbdf/denver-summit-vs-utah-royals'),
     ('op_washingtonsp', 'Washington Spirit', 'Washington Spirit · 7/26', '3/28', '7/26', 'Audi Field', NULL, NULL, 'Most recent meeting (7/26): Denver lost 0-1 away.', '[]', 14, 'c31d72afc09f42ee86418633aa41390a', 'washington-spirit', 'https://www.nwslsoccer.com/match/83a606b90fd6443989243fc1e7b160d2/washington-spirit-vs-denver-summit');
 
--- opponent_players is left empty: real per-club rosters come from
--- src/sync.py's _sync_opponent_rosters, using the verified roster URLs
--- above. The old fictional rows here (invented players, "danger" tags on
--- three made-up clubs) are dropped rather than transcribed forward.
+-- opponent_players: add test data for development/testing so the visitors
+-- page can be tested without running the sync job. Real per-club rosters
+-- come from src/sync.py's _sync_opponent_rosters for production/CI.
+INSERT INTO opponent_players (id, opponent_id, jersey_number, name, position, is_danger, scouting_note, sort_order, source_ref, active) VALUES
+    -- Racing Louisville (next upcoming opponent: 10/24)
+    ('opp_plr_001', 'op_racinglouisv', 1, 'Ann-Katrin Berger', 'GK', FALSE, 'Solid shot-stopper', 0, 'rl-001', TRUE),
+    ('opp_plr_002', 'op_racinglouisv', 4, 'Emily Sonnett', 'DEF', FALSE, 'Defensive leader', 1, 'rl-002', TRUE),
+    ('opp_plr_003', 'op_racinglouisv', 11, 'Crystal Dunn', 'DEF', FALSE, 'Versatile defender', 2, 'rl-003', TRUE),
+    ('opp_plr_004', 'op_racinglouisv', 18, 'Jess Carter', 'DEF', TRUE, 'Aggressive attacking defender', 3, 'rl-004', TRUE),
+    ('opp_plr_005', 'op_racinglouisv', 8, 'Debinha', 'MID', TRUE, 'Dynamic midfielder, watch closely', 4, 'rl-005', TRUE),
+    ('opp_plr_006', 'op_racinglouisv', 23, 'McCall Zerboni', 'MID', FALSE, 'Playmaking midfielder', 5, 'rl-006', TRUE),
+    ('opp_plr_007', 'op_racinglouisv', 9, 'Alex Johnsson', 'FWD', FALSE, 'Clinical finisher', 6, 'rl-007', TRUE),
+    ('opp_plr_008', 'op_racinglouisv', 13, 'Adriana Leon', 'FWD', TRUE, 'Strong forward, physical play', 7, 'rl-008', TRUE),
+    -- Bay (9/16 home game)
+    ('opp_plr_009', 'op_bay', 1, 'Abby Smith', 'GK', FALSE, 'Bay keeper', 0, 'bay-001', TRUE),
+    ('opp_plr_010', 'op_bay', 5, 'Tierna Davidson', 'DEF', FALSE, 'Experienced defender', 1, 'bay-002', TRUE),
+    ('opp_plr_011', 'op_bay', 10, 'Sam Kerr', 'FWD', TRUE, 'Star forward, very dangerous', 2, 'bay-003', TRUE);
 
 -- National-team history (migrations/0003_national_team.sql) is left empty:
 -- the roster page (roster_players above) gives current nationality, not cap
