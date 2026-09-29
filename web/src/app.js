@@ -1684,11 +1684,6 @@ async function paintVisitors() {
     })),
   }));
 
-  // Debug: log first opponent's players to see what data we're getting
-  if (opponents.length > 0) {
-    console.log('First opponent players:', opponents[0].players);
-  }
-
   opponents = filterUpcomingHomeGames(opponents);
   visitorsOpponentsCache = opponents;
 
