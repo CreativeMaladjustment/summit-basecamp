@@ -1598,10 +1598,10 @@ function makeDossierCard(opponent) {
   const title = document.createElement('div');
   const club = document.createElement('p');
   club.style.cssText = 'margin:0;font-weight:600;font-size:16px';
-  club.textContent = opponent.club;
+  club.textContent = opponent.club || 'Opponent';
   const matchDate = document.createElement('p');
   matchDate.style.cssText = 'margin:4px 0 0;font-size:12px;color:var(--ink-mute)';
-  matchDate.textContent = opponent.home_date ? `${matchDateLabel(opponent.home_date)} at ${opponent.away_venue}` : '';
+  matchDate.textContent = opponent.home_date ? `${matchDateLabel(opponent.home_date)}` : '';
   title.append(club, matchDate);
 
   let badge;
@@ -1667,6 +1667,11 @@ async function paintVisitors() {
     })),
   }));
 
+  // Debug: log first opponent's players to see what data we're getting
+  if (opponents.length > 0) {
+    console.log('First opponent players:', opponents[0].players);
+  }
+
   opponents = filterUpcomingHomeGames(opponents);
   visitorsOpponentsCache = opponents;
 
@@ -1687,7 +1692,7 @@ async function paintVisitors() {
     chip.dataset.role = 'visitors-chip';
     chip.dataset.opponentId = opponent.id;
     chip.setAttribute('aria-selected', String(visitorsSelectedOpponent === opponent.id));
-    chip.textContent = opponent.chip;
+    chip.textContent = opponent.chip_label || opponent.club || 'Opponent';
     chipsContainer.appendChild(chip);
   }
 
