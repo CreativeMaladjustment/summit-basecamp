@@ -554,8 +554,14 @@ let realFixturesCache = [];   // [{fixture, seats}], sorted by kickoff
 let realBenchNotesCache = []; // [{...note, replies}], newest first
 let callASubTarget = null;    // {allocationId, fixtureId, seatNumber, faceCents}
 
-function matchDateLabel(iso) {
-  const d = new Date(iso);
+function matchDateLabel(dateStr) {
+  // Handle MM/DD format (add current year if needed)
+  let d;
+  if (dateStr && /^\d{1,2}\/\d{1,2}$/.test(dateStr)) {
+    d = new Date(`${dateStr}/${new Date().getFullYear()}`);
+  } else {
+    d = new Date(dateStr);
+  }
   return `${d.toLocaleDateString('en-US', { weekday: 'short' })}, ${d.toLocaleDateString('en-US', { month: 'short' })} ${d.getDate()}`;
 }
 
@@ -1542,10 +1548,21 @@ let visitorsSelectedOpponent = null;
 
 function filterUpcomingHomeGames(opponents) {
   const now = new Date();
+  const currentYear = now.getFullYear();
+
+  function parseDate(dateStr) {
+    // Handle MM/DD format (add current year if needed)
+    if (dateStr && /^\d{1,2}\/\d{1,2}$/.test(dateStr)) {
+      return new Date(`${dateStr}/${currentYear}`);
+    }
+    // Handle ISO format or other standard formats
+    return new Date(dateStr);
+  }
+
   return opponents.filter((op) => {
     if (!op.home_date) return false;
-    return new Date(op.home_date) >= now;
-  }).sort((a, b) => new Date(a.home_date) - new Date(b.home_date));
+    return parseDate(op.home_date) >= now;
+  }).sort((a, b) => parseDate(a.home_date) - parseDate(b.home_date));
 }
 
 function makePlayerCard(player) {
